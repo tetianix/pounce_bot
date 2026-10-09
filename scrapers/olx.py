@@ -1,6 +1,10 @@
-import requests
+from curl_cffi import requests
 import re
 from bs4 import BeautifulSoup
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+}
 
 def clean_price(price):
     cleaned = re.sub(r'\D', '', price)
@@ -17,8 +21,9 @@ def clean_photo(url):
 def scrape(query, page=1):
     url = f"https://www.olx.ua/uk/list/q-{query}/?page={page}"
     try:
-        response = requests.get(url, timeout=10)
-    except Exception:
+        response = requests.get(url, timeout=10, impersonate="chrome")
+    except Exception as e:
+        print("помилка запиту:", e)
         return []
 
     if response.status_code == 200:
@@ -37,7 +42,7 @@ def scrape(query, page=1):
             card_id = card['id']
             photo = card.select_one('img')
             link = name['href']
-            photo = clean_photo(photo['src']) if photo else None
+            photo = clean_photo(photo.get('src')) if photo else None
             cleaned_price = clean_price(price.text)
             data = {"id": card_id,
                     "source": "olx",
@@ -49,15 +54,16 @@ def scrape(query, page=1):
                     "link" : f"https://www.olx.ua{link}"}
             results.append(data)
         return results
+    print("статус:", response.status_code)
     return []
 
 def scrape_details(link):
     try:
-        request = requests.get(link, timeout=10)
+        response = requests.get(link, timeout=10, impersonate="chrome")
     except Exception:
         return {"description": None, "photos": []}
-    if request.status_code == 200:
-        soup = BeautifulSoup(request.content, 'html.parser')
+    if response.status_code == 200:
+        soup = BeautifulSoup(response.content, 'html.parser')
         description = soup.select_one('[data-cy="ad_description"] div')
         photo = soup.select('[data-testid="ad-photo"] img')
         photos = []

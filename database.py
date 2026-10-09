@@ -36,6 +36,45 @@ def create_watches_table():
     connection.commit()
     connection.close()
 
+def create_price_history_table():
+    connection = sqlite3.connect('database.db')
+    cursor = connection.cursor()
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS price_history(
+    id INTEGER PRIMARY KEY AUTOINCREMENT, 
+    ad_id TEXT NOT NULL,
+    ad_source TEXT NOT NULL,
+    price INTEGER NOT NULL,
+    changed_at TEXT,
+    FOREIGN KEY (ad_source, ad_id) REFERENCES ads(source, id))''')
+    connection.commit()
+    connection.close()
+
+def create_favorites_table():
+    connection = sqlite3.connect('database.db')
+    cursor = connection.cursor()
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS favorites(
+    id INTEGER PRIMARY KEY AUTOINCREMENT, 
+    user_id INTEGER NOT NULL,
+    ad_id TEXT NOT NULL,
+    ad_source TEXT NOT NULL,
+    saved_at TEXT,
+    UNIQUE(user_id, ad_id, ad_source),
+    FOREIGN KEY (ad_source, ad_id) REFERENCES ads(source, id))''')
+    connection.commit()
+    connection.close()
+
+def save_price(ad_id, ad_source, price):
+    connection = sqlite3.connect('database.db')
+    cursor = connection.cursor()
+    cursor.execute("""
+    INSERT INTO price_history (ad_id, ad_source, price, changed_at)
+    VALUES (?, ?, ?, ?)
+    """, (ad_id, ad_source, price, datetime.now().isoformat()))
+    connection.commit()
+    connection.close()
+
 def save_ad(ad, query):
     connection = sqlite3.connect('database.db')
     cursor = connection.cursor()
@@ -62,6 +101,16 @@ def save_watch(user_id, query, max_price, min_price):
     connection.commit()
     connection.close()
 
+def save_favorite(user_id, ad_id, ad_source):
+    connection = sqlite3.connect('database.db')
+    cursor = connection.cursor()
+    cursor.execute("""
+                    INSERT OR IGNORE INTO favorites (user_id, ad_id, ad_source, saved_at) 
+                    VALUES (?, ?, ?, ?)
+                    """, (user_id, ad_id, ad_source, datetime.now().isoformat()))
+    connection.commit()
+    connection.close()
+
 def get_active_watches():
     connection = sqlite3.connect('database.db')
     connection.row_factory = sqlite3.Row
@@ -73,6 +122,21 @@ def get_active_watches():
     result = cursor.fetchall()
     connection.close()
     return result
+
+def get_last_price(ad_id, ad_source):
+    connection = sqlite3.connect('database.db')
+    cursor = connection.cursor()
+    cursor.execute("""
+    SELECT price 
+    FROM price_history 
+    WHERE ad_id = ? 
+    AND ad_source = ?
+    ORDER BY id DESC LIMIT 1""",(ad_id, ad_source))
+    result = cursor.fetchone()
+    connection.close()
+    if result is None:
+        return None
+    return result[0]
 
 def get_user_watches(user_id):
     connection = sqlite3.connect('database.db')
@@ -86,52 +150,6 @@ def get_user_watches(user_id):
     result = cursor.fetchall()
     connection.close()
     return result
-
-def delete_watch(watch_id):
-    connection = sqlite3.connect('database.db')
-    cursor = connection.cursor()
-    cursor.execute("""
-                    DELETE FROM watches 
-                    WHERE id = ?
-                    """, (watch_id,))
-    connection.commit()
-    connection.close()
-
-def toggle_watch(watch_id):
-    connection = sqlite3.connect('database.db')
-    cursor = connection.cursor()
-    cursor.execute("""
-                    UPDATE watches 
-                    SET is_active = 1 - is_active
-                    WHERE id = ?
-                    """, (watch_id,))
-    connection.commit()
-    connection.close()
-
-def get_watch(watch_id):
-    connection = sqlite3.connect('database.db')
-    connection.row_factory = sqlite3.Row
-    cursor = connection.cursor()
-    cursor.execute("""
-                    SELECT *
-                    FROM watches 
-                    WHERE id = ?
-                    """, (watch_id,))
-    result = cursor.fetchone()
-    connection.close()
-    return result
-
-def ad_exists(ad_id, source):
-    connection = sqlite3.connect('database.db')
-    cursor = connection.cursor()
-    cursor.execute("""
-                    SELECT name 
-                    FROM ads 
-                    WHERE id = ? AND source = ?
-                    """, (ad_id, source))
-    result = cursor.fetchone()
-    connection.close()
-    return result is not None
 
 def get_link(ad_id, source):
     connection = sqlite3.connect('database.db')
@@ -158,3 +176,73 @@ def get_ads_by_query(query, limit, offset):
     result = cursor.fetchall()
     connection.close()
     return result
+
+def get_favorites(user_id):
+    connection = sqlite3.connect('database.db')
+    connection.row_factory = sqlite3.Row
+    cursor = connection.cursor()
+    cursor.execute("""
+                    SELECT ads.*
+                    FROM favorites
+                    JOIN ads ON favorites.ad_id = ads.id AND favorites.ad_source = ads.source
+                    WHERE favorites.user_id = ?
+                    """, (user_id,))
+    result = cursor.fetchall()
+    connection.close()
+    return result
+
+def get_watch(watch_id):
+    connection = sqlite3.connect('database.db')
+    connection.row_factory = sqlite3.Row
+    cursor = connection.cursor()
+    cursor.execute("""
+                    SELECT *
+                    FROM watches 
+                    WHERE id = ?
+                    """, (watch_id,))
+    result = cursor.fetchone()
+    connection.close()
+    return result
+
+def delete_watch(watch_id):
+    connection = sqlite3.connect('database.db')
+    cursor = connection.cursor()
+    cursor.execute("""
+                    DELETE FROM watches 
+                    WHERE id = ?
+                    """, (watch_id,))
+    connection.commit()
+    connection.close()
+
+def delete_favorite(user_id, ad_id, ad_source):
+    connection = sqlite3.connect('database.db')
+    cursor = connection.cursor()
+    cursor.execute("""
+                    DELETE FROM favorites 
+                    WHERE user_id = ? AND ad_id = ? AND ad_source = ?
+                    """, (user_id, ad_id, ad_source))
+    connection.commit()
+    connection.close()
+                        
+def toggle_watch(watch_id):
+    connection = sqlite3.connect('database.db')
+    cursor = connection.cursor()
+    cursor.execute("""
+                    UPDATE watches 
+                    SET is_active = 1 - is_active
+                    WHERE id = ?
+                    """, (watch_id,))
+    connection.commit()
+    connection.close()
+
+def ad_exists(ad_id, source):
+    connection = sqlite3.connect('database.db')
+    cursor = connection.cursor()
+    cursor.execute("""
+                    SELECT name 
+                    FROM ads 
+                    WHERE id = ? AND source = ?
+                    """, (ad_id, source))
+    result = cursor.fetchone()
+    connection.close()
+    return result is not None

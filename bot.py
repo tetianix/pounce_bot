@@ -11,13 +11,14 @@ from aiogram.types import (
 from dotenv import load_dotenv
 from core import search
 from filters import filter_by_price
-from database import (save_ad, get_link, get_ads_by_query, save_watch, get_active_watches, ad_exists, get_user_watches,
-                      get_watch, delete_watch, toggle_watch)
+from database import (save_ad, get_link, save_watch, get_active_watches, ad_exists, get_user_watches,
+                      get_watch, delete_watch, toggle_watch, get_last_price, save_price, save_favorite, get_favorites,
+                      delete_favorite)
 from scrapers.olx import scrape_details
 import asyncio
 import os
 
-CHECK_INTERVAL_MINUTES = 1
+CHECK_INTERVAL_MINUTES = 5
 
 load_dotenv()
 token = os.getenv("BOT_TOKEN")
@@ -56,15 +57,19 @@ def build_watch_card(watch):
     return text, keyboard
 
 
-async def send_ad_card(chat_id, ad, prefix=""):
+async def send_ad_card(chat_id, ad, prefix="", in_favorites=False):
     photo = ad['photo']
     if photo is None or not photo.startswith("http"):
         details = scrape_details(ad['link'])
         if details["photos"]:
             photo = details["photos"][0]
     text = f"{prefix}{ad['name']}\n{ad['price']} грн\n{ad['town']}\n{ad['link']}"
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Детальніше", callback_data=f"details:{ad['source']}:{ad['id']}")]])
+    fav_text = "🗑 Прибрати" if in_favorites else "⭐"
+    fav_action = "unfav" if in_favorites else "fav"
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="Детальніше", callback_data=f"details:{ad['source']}:{ad['id']}"),
+        InlineKeyboardButton(text=fav_text, callback_data=f"{fav_action}:{ad['source']}:{ad['id']}")
+    ]])
     if photo is not None and photo.startswith("http"):
         try:
             await bot.send_photo(chat_id=chat_id, photo=photo, caption=text, reply_markup=keyboard)
@@ -91,6 +96,17 @@ async def check_watches():
         for ad in ads:
             if not ad_exists(ad["id"], ad["source"]):
                 await send_ad_card(user_id, ad, "🆕 Нове оголошення\n")
+            if ad["price"] is not None:
+                last_price = get_last_price(ad["id"], ad["source"])
+                if last_price is None:
+                    save_price(ad["id"], ad["source"], ad["price"])
+                elif last_price != ad["price"]:
+                    save_price(ad["id"], ad["source"], ad["price"])
+                    if ad["price"] < last_price:
+                        prefix = "📉 Подешевшало"
+                    else:
+                        prefix = "📈 Подорожчало"
+                    await send_ad_card(user_id, ad, f"{prefix} було {last_price} грн\n")
             save_ad(ad, query)
 
 
@@ -140,6 +156,15 @@ async def watches_handler(message: Message):
         text, keyboard = build_watch_card(watch)
         await message.answer(text, reply_markup=keyboard)
 
+@dp.message(Command("saved"))
+async def saved_handler(message: Message):
+    ads = get_favorites(message.from_user.id)
+    if not ads:
+        await message.answer("Обране порожнє")
+        return
+    for ad in ads:
+        await send_ad_card(message.chat.id, ad, in_favorites=True)
+
 @dp.callback_query(F.data.startswith("details:"))
 async def details_handler(callback: CallbackQuery):
     parts = callback.data.split(":")
@@ -157,7 +182,6 @@ async def details_handler(callback: CallbackQuery):
         await callback.message.answer_media_group(media)
     elif len(media) == 1:
         await callback.message.answer_photo(details["photos"][0])
-
     description = details["description"] or "Опис відсутній"
     await callback.message.answer(description[:3000])
     await callback.answer()
@@ -206,6 +230,23 @@ async def more_handler(callback: CallbackQuery):
             [InlineKeyboardButton(text="Ще 5", callback_data=f"more:{query}:{page + 1}:{max_str}:{min_str}")]])
         await callback.message.answer("Показати більше?", reply_markup=more_keyboard)
     await callback.answer()
+
+@dp.callback_query(F.data.startswith("fav:"))
+async def fav_handler(callback: CallbackQuery):
+    parts = callback.data.split(":")
+    source = parts[1]
+    ad_id = parts[2]
+    save_favorite(callback.from_user.id, ad_id, source)
+    await callback.answer("⭐ Збережено")
+
+@dp.callback_query(F.data.startswith("unfav:"))
+async def unfav_handler(callback: CallbackQuery):
+    parts = callback.data.split(":")
+    source = parts[1]
+    ad_id = parts[2]
+    delete_favorite(callback.from_user.id, ad_id, source)
+    await callback.message.delete()
+    await callback.answer("Видалено")
 
 async def main():
     scheduler = AsyncIOScheduler()
