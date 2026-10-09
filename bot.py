@@ -9,6 +9,8 @@ from aiogram.types import (
     InputMediaPhoto,
     BufferedInputFile,
     FSInputFile,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
 )
 from dotenv import load_dotenv
 from core import search
@@ -20,13 +22,14 @@ from scrapers.olx import scrape_details, download_photo
 import asyncio
 import os
 
-CHECK_INTERVAL_MINUTES = 5
+CHECK_INTERVAL_MINUTES = 15
 
 load_dotenv()
 token = os.getenv("BOT_TOKEN")
 bot = Bot(token=token)
 dp = Dispatcher()
 user_results = {}
+
 
 def parse_query(text):
     words = text.split(" ")
@@ -42,6 +45,34 @@ def parse_query(text):
             results.append(word)
     query = " ".join(results)
     return query, max_price, min_price
+
+
+def get_ad_photo(ad):
+    url = ad['photo']
+    if url is None or not url.startswith('http'):
+        details = scrape_details(ad['link'])
+        if details["photos"]:
+            url = details["photos"][0]
+
+    if url is not None and url.startswith('http'):
+        data = download_photo(url)
+        if data:
+            return BufferedInputFile(data, filename="photo.jpg")
+
+    return FSInputFile("placeholder.jpg")
+
+
+def build_main_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[[
+            KeyboardButton(text="📌 Мої пошуки"),
+            KeyboardButton(text="⭐ Обране"),
+        ]],
+        resize_keyboard=True,
+        is_persistent=True,
+        input_field_placeholder="Що шукаємо? Напр. помада <500",
+    )
+
 
 def build_watch_card(watch):
     price_text = ""
@@ -59,6 +90,7 @@ def build_watch_card(watch):
     ]])
     return text, keyboard
 
+
 def build_ad_card(ad, index, total):
     text = f"{ad['name']}\n{ad['price']} грн\n{ad['town']}\n{ad['link']}"
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -67,15 +99,13 @@ def build_ad_card(ad, index, total):
             InlineKeyboardButton(text=f"{index + 1} / {total}", callback_data="noop"),
             InlineKeyboardButton(text="▶️", callback_data=f"nav:{index + 1}"),
         ],
-        [                           # рядок 2: дії з оголошенням
-            InlineKeyboardButton(text="Детальніше", callback_data=f"details:{ad['source']}:{ad['id']}"),
-            InlineKeyboardButton(text="⭐", callback_data=f"fav:{ad['source']}:{ad['id']}")
-        ],
-        [                           # рядок 3: повернення
-            InlineKeyboardButton(text="🏠 Меню", callback_data="menu"),
+        [
+            InlineKeyboardButton(text="Детальніше", callback_data=f"info:{index}"),
+            InlineKeyboardButton(text="⭐", callback_data=f"fav:{ad['source']}:{ad['id']}"),
         ],
     ])
     return text, keyboard
+
 
 async def send_ad_card(chat_id, ad, prefix="", in_favorites=False):
     photo = ad['photo']
@@ -101,6 +131,23 @@ async def send_ad_card(chat_id, ad, prefix="", in_favorites=False):
                 await bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
     else:
         await bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
+
+
+async def run_search(message, text):
+    query, max_price, min_price = parse_query(text)
+    await message.answer("Шукаю...")
+    ads = search(query)
+    if max_price is not None or min_price is not None:
+        ads = filter_by_price(ads, max_price=max_price, min_price=min_price)
+    if not ads:
+        await message.answer("Нічого не знайдено")
+        return
+    for ad in ads:
+        save_ad(ad, query)
+    user_results[message.from_user.id] = ads
+    text, keyboard = build_ad_card(ads[0], 0, len(ads))
+    await message.answer_photo(photo=get_ad_photo(ads[0]), caption=text, reply_markup=keyboard)
+
 
 async def check_watches():
     watches = get_active_watches()
@@ -132,7 +179,11 @@ async def check_watches():
 
 @dp.message(Command("start"))
 async def start_handler(message: Message):
-    await message.answer("Привіт! Я Pounce 🐾")
+    await message.answer(
+        "Привіт! Я Pounce 🐾\nНапиши, що шукаєш — і я покажу оголошення.",
+        reply_markup=build_main_keyboard()
+    )
+
 
 @dp.message(Command("search"))
 async def search_handler(message: Message):
@@ -140,19 +191,8 @@ async def search_handler(message: Message):
     if len(parts) != 2:
         await message.answer("Напиши що шукати: /search товар")
         return
-    query, max_price, min_price = parse_query(parts[1])
-    await message.answer("Шукаю...")
-    ads = search(query)
-    if max_price is not None or min_price is not None:
-        ads = filter_by_price(ads, max_price=max_price, min_price=min_price)
-    if not ads:
-        await message.answer("НІчого не знайдено")
-        return
-    for ad in ads:
-        save_ad(ad, query)
-    user_results[message.from_user.id] = ads
-    text, keyboard = build_ad_card(ads[0], 0, len(ads))
-    await message.answer_photo(photo=get_ad_photo(ads[0]), caption=text, reply_markup=keyboard)
+    await run_search(message, parts[1])
+
 
 @dp.message(Command("watch"))
 async def watch_handler(message: Message):
@@ -164,7 +204,9 @@ async def watch_handler(message: Message):
     save_watch(message.from_user.id, query, max_price, min_price)
     await message.answer(f"Стежу за «{query}»")
 
+
 @dp.message(Command("watches"))
+@dp.message(F.text == "📌 Мої пошуки")
 async def watches_handler(message: Message):
     watches = get_user_watches(message.from_user.id)
     if not watches:
@@ -174,7 +216,9 @@ async def watches_handler(message: Message):
         text, keyboard = build_watch_card(watch)
         await message.answer(text, reply_markup=keyboard)
 
+
 @dp.message(Command("saved"))
+@dp.message(F.text == "⭐ Обране")
 async def saved_handler(message: Message):
     ads = get_favorites(message.from_user.id)
     if not ads:
@@ -182,6 +226,57 @@ async def saved_handler(message: Message):
         return
     for ad in ads:
         await send_ad_card(message.chat.id, ad, in_favorites=True)
+
+
+@dp.callback_query(F.data.startswith("nav:"))
+async def nav_handler(callback: CallbackQuery):
+    parts = callback.data.split(":")
+    index = int(parts[1])
+    ads = user_results.get(callback.from_user.id)
+    if ads is None:
+        await callback.answer("Пошук застарів, зроби новий")
+        return
+    if index < 0 or index >= len(ads):
+        await callback.answer("Це край списку")
+        return
+    ad = ads[index]
+    text, keyboard = build_ad_card(ad, index, len(ads))
+    await callback.message.edit_media(
+        media=InputMediaPhoto(media=get_ad_photo(ad), caption=text),
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("info:"))
+async def info_handler(callback: CallbackQuery):
+    parts = callback.data.split(":")
+    index = int(parts[1])
+    ads = user_results.get(callback.from_user.id)
+    if ads is None:
+        await callback.answer("Пошук застарів, зроби новий")
+        return
+    ad = ads[index]
+
+    details = scrape_details(ad['link'])
+    description = details["description"] or "Опис відсутній"
+
+    text = f"{ad['name']}\n{ad['price']} грн\n\n{description}"
+    if len(text) > 1024:
+        text = text[:1020] + "..."
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔗 Відкрити на OLX", url=ad['link'])],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data=f"nav:{index}")],
+    ])
+    await callback.message.edit_caption(caption=text, reply_markup=keyboard)
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "noop")
+async def noop_handler(callback: CallbackQuery):
+    await callback.answer()
+
 
 @dp.callback_query(F.data.startswith("details:"))
 async def details_handler(callback: CallbackQuery):
@@ -204,6 +299,26 @@ async def details_handler(callback: CallbackQuery):
     await callback.message.answer(description[:3000])
     await callback.answer()
 
+
+@dp.callback_query(F.data.startswith("fav:"))
+async def fav_handler(callback: CallbackQuery):
+    parts = callback.data.split(":")
+    source = parts[1]
+    ad_id = parts[2]
+    save_favorite(callback.from_user.id, ad_id, source)
+    await callback.answer("⭐ Збережено")
+
+
+@dp.callback_query(F.data.startswith("unfav:"))
+async def unfav_handler(callback: CallbackQuery):
+    parts = callback.data.split(":")
+    source = parts[1]
+    ad_id = parts[2]
+    delete_favorite(callback.from_user.id, ad_id, source)
+    await callback.message.delete()
+    await callback.answer("Прибрано з обраного")
+
+
 @dp.callback_query(F.data.startswith("delete:"))
 async def delete_handler(callback: CallbackQuery):
     parts = callback.data.split(":")
@@ -211,6 +326,7 @@ async def delete_handler(callback: CallbackQuery):
     delete_watch(watch_id)
     await callback.message.delete()
     await callback.answer("Видалено")
+
 
 @dp.callback_query(F.data.startswith("pause:"))
 async def pause_handler(callback: CallbackQuery):
@@ -222,91 +338,20 @@ async def pause_handler(callback: CallbackQuery):
     await callback.message.edit_text(text, reply_markup=keyboard)
     await callback.answer()
 
-@dp.callback_query(F.data.startswith("more:"))
-async def more_handler(callback: CallbackQuery):
-    parts = callback.data.split(":")
-    query = parts[1]
-    page = int(parts[2])
-    max_price = int(parts[3])
-    min_price = int(parts[4])
-    max_price = None if max_price == 0 else max_price
-    min_price = None if min_price == 0 else min_price
-    ads = search(query, page)
-    total_found = len(ads)
-    if max_price is not None or min_price is not None:
-        ads = filter_by_price(ads, max_price=max_price, min_price=min_price)
-    if not ads:
-        await callback.answer("Більше немає")
+
+@dp.message(F.text)
+async def text_handler(message: Message):
+    if message.text.startswith("/"):
+        await message.answer("Не знаю такої команди 🐾")
         return
-    for ad in ads[:5]:
-        save_ad(ad, query)
-        await send_ad_card(callback.message.chat.id, ad)
-    max_str = max_price if max_price is not None else 0
-    min_str = min_price if min_price is not None else 0
-    if total_found >= 40:
-        more_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Ще 5", callback_data=f"more:{query}:{page + 1}:{max_str}:{min_str}")]])
-        await callback.message.answer("Показати більше?", reply_markup=more_keyboard)
-    await callback.answer()
+    await run_search(message, message.text)
 
-@dp.callback_query(F.data.startswith("fav:"))
-async def fav_handler(callback: CallbackQuery):
-    parts = callback.data.split(":")
-    source = parts[1]
-    ad_id = parts[2]
-    save_favorite(callback.from_user.id, ad_id, source)
-    await callback.answer("⭐ Збережено")
-
-@dp.callback_query(F.data.startswith("unfav:"))
-async def unfav_handler(callback: CallbackQuery):
-    parts = callback.data.split(":")
-    source = parts[1]
-    ad_id = parts[2]
-    delete_favorite(callback.from_user.id, ad_id, source)
-    await callback.message.delete()
-    await callback.answer("Видалено")
-
-@dp.callback_query(F.data.startswith("nav:"))
-async def nav_handler(callback: CallbackQuery):
-    parts = callback.data.split(":")
-    index = int(parts[1])
-    ads = user_results.get(callback.from_user.id)
-    if ads is None:
-        await callback.answer("Пошук застарів, зроби новий")
-        return
-    if index < 0 or index >= len(ads):
-        await callback.answer("Це край списку")
-        return
-    ad = ads[index]
-    text, keyboard = build_ad_card(ad, index, len(ads))
-
-    await callback.message.edit_media(
-        media=InputMediaPhoto(media=get_ad_photo(ad), caption=text),
-        reply_markup=keyboard
-    )
-    await callback.answer()
-
-@dp.callback_query(F.data == "noop")
-async def noop_handler(callback: CallbackQuery):
-    await callback.answer()
-
-def get_ad_photo(ad):
-    url = ad['photo']
-    if url is None or not url.startswith('http'):
-        details = scrape_details(ad['link'])
-        if details["photos"]:
-            url = details["photos"][0]
-
-    if url is not None and url.startswith('http'):
-        data = download_photo(url)
-        if data:
-            return BufferedInputFile(data, filename="photo.jpg")
-
-    return FSInputFile("placeholder.jpg")
 
 async def main():
     scheduler = AsyncIOScheduler()
     scheduler.add_job(check_watches, "interval", minutes=CHECK_INTERVAL_MINUTES)
     scheduler.start()
     await dp.start_polling(bot)
+
+
 asyncio.run(main())
