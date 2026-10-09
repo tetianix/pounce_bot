@@ -73,3 +73,12 @@ def scrape_details(link):
         text = description.text if description else None
         return {"description": text, "photos": photos}
     return {"description": None, "photos": []}
+
+def download_photo(url):
+    try:
+        response = requests.get(url, timeout=10, impersonate="chrome")
+    except Exception:
+        return None
+    if response.status_code == 200:
+        return response.content
+    return None

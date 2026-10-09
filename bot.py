@@ -7,6 +7,8 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
     InputMediaPhoto,
+    BufferedInputFile,
+    FSInputFile,
 )
 from dotenv import load_dotenv
 from core import search
@@ -14,7 +16,7 @@ from filters import filter_by_price
 from database import (save_ad, get_link, save_watch, get_active_watches, ad_exists, get_user_watches,
                       get_watch, delete_watch, toggle_watch, get_last_price, save_price, save_favorite, get_favorites,
                       delete_favorite)
-from scrapers.olx import scrape_details
+from scrapers.olx import scrape_details, download_photo
 import asyncio
 import os
 
@@ -24,6 +26,7 @@ load_dotenv()
 token = os.getenv("BOT_TOKEN")
 bot = Bot(token=token)
 dp = Dispatcher()
+user_results = {}
 
 def parse_query(text):
     words = text.split(" ")
@@ -56,6 +59,23 @@ def build_watch_card(watch):
     ]])
     return text, keyboard
 
+def build_ad_card(ad, index, total):
+    text = f"{ad['name']}\n{ad['price']} грн\n{ad['town']}\n{ad['link']}"
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="◀️", callback_data=f"nav:{index - 1}"),
+            InlineKeyboardButton(text=f"{index + 1} / {total}", callback_data="noop"),
+            InlineKeyboardButton(text="▶️", callback_data=f"nav:{index + 1}"),
+        ],
+        [                           # рядок 2: дії з оголошенням
+            InlineKeyboardButton(text="Детальніше", callback_data=f"details:{ad['source']}:{ad['id']}"),
+            InlineKeyboardButton(text="⭐", callback_data=f"fav:{ad['source']}:{ad['id']}")
+        ],
+        [                           # рядок 3: повернення
+            InlineKeyboardButton(text="🏠 Меню", callback_data="menu"),
+        ],
+    ])
+    return text, keyboard
 
 async def send_ad_card(chat_id, ad, prefix="", in_favorites=False):
     photo = ad['photo']
@@ -123,18 +143,16 @@ async def search_handler(message: Message):
     query, max_price, min_price = parse_query(parts[1])
     await message.answer("Шукаю...")
     ads = search(query)
-    total_found = len(ads)
     if max_price is not None or min_price is not None:
         ads = filter_by_price(ads, max_price=max_price, min_price=min_price)
-    for ad in ads[:5]:
+    if not ads:
+        await message.answer("НІчого не знайдено")
+        return
+    for ad in ads:
         save_ad(ad, query)
-        await send_ad_card(message.chat.id, ad)
-    max_str = max_price if max_price is not None else 0
-    min_str = min_price if min_price is not None else 0
-    if total_found >= 40:
-        more_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Ще 5", callback_data=f"more:{query}:2:{max_str}:{min_str}")]])
-        await message.answer("Показати більше?", reply_markup=more_keyboard)
+    user_results[message.from_user.id] = ads
+    text, keyboard = build_ad_card(ads[0], 0, len(ads))
+    await message.answer_photo(photo=get_ad_photo(ads[0]), caption=text, reply_markup=keyboard)
 
 @dp.message(Command("watch"))
 async def watch_handler(message: Message):
@@ -247,6 +265,44 @@ async def unfav_handler(callback: CallbackQuery):
     delete_favorite(callback.from_user.id, ad_id, source)
     await callback.message.delete()
     await callback.answer("Видалено")
+
+@dp.callback_query(F.data.startswith("nav:"))
+async def nav_handler(callback: CallbackQuery):
+    parts = callback.data.split(":")
+    index = int(parts[1])
+    ads = user_results.get(callback.from_user.id)
+    if ads is None:
+        await callback.answer("Пошук застарів, зроби новий")
+        return
+    if index < 0 or index >= len(ads):
+        await callback.answer("Це край списку")
+        return
+    ad = ads[index]
+    text, keyboard = build_ad_card(ad, index, len(ads))
+
+    await callback.message.edit_media(
+        media=InputMediaPhoto(media=get_ad_photo(ad), caption=text),
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+@dp.callback_query(F.data == "noop")
+async def noop_handler(callback: CallbackQuery):
+    await callback.answer()
+
+def get_ad_photo(ad):
+    url = ad['photo']
+    if url is None or not url.startswith('http'):
+        details = scrape_details(ad['link'])
+        if details["photos"]:
+            url = details["photos"][0]
+
+    if url is not None and url.startswith('http'):
+        data = download_photo(url)
+        if data:
+            return BufferedInputFile(data, filename="photo.jpg")
+
+    return FSInputFile("placeholder.jpg")
 
 async def main():
     scheduler = AsyncIOScheduler()
