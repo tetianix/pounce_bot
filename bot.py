@@ -235,28 +235,6 @@ async def start_handler(message: Message):
     )
 
 
-@dp.message(Command("search"))
-async def search_handler(message: Message):
-    parts = message.text.split(" ", 1)
-    if len(parts) != 2:
-        await message.answer("Напиши що шукати: /search товар")
-        return
-    query, max_price, min_price = parse_query(parts[1])
-    await run_search(message, query, min_price, max_price)
-
-
-@dp.message(Command("watch"))
-async def watch_handler(message: Message):
-    parts = message.text.split(" ", 1)
-    if len(parts) != 2:
-        await message.answer("Напиши що відстежувати: /watch товар")
-        return
-    query, max_price, min_price = parse_query(parts[1])
-    save_watch(message.from_user.id, query, max_price, min_price)
-    await message.answer(f"Стежу за «{query}»")
-
-
-@dp.message(Command("watches"))
 @dp.message(F.text == "📌 Мої пошуки")
 async def watches_handler(message: Message):
     watches = get_user_watches(message.from_user.id)
@@ -268,7 +246,6 @@ async def watches_handler(message: Message):
         await message.answer(text, reply_markup=keyboard)
 
 
-@dp.message(Command("saved"))
 @dp.message(F.text == "⭐ Обране")
 async def saved_handler(message: Message):
     ads = list(get_favorites(message.from_user.id))
