@@ -6,6 +6,12 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
 }
 
+SORTS = {
+    "new": "created_at:desc",
+    "cheap": "filter_float_price:asc",
+    "expensive": "filter_float_price:desc",
+}
+
 def clean_price(price):
     cleaned = re.sub(r'\D', '', price)
     if cleaned == "":
@@ -18,10 +24,19 @@ def clean_photo(url):
     photo = re.sub(r';s=\d+x\d+;q=\d+', ";s=1000x1000;q=90", url)
     return photo
 
-def scrape(query, page=1):
-    url = f"https://www.olx.ua/uk/list/q-{query}/?page={page}&search[order]=created_at:desc"
+def scrape(query, page=1, min_price=None, max_price=None, sort="new"):
+    url = f"https://www.olx.ua/uk/list/q-{query}/"
+
+    params = {
+        "page": page,
+        "search[order]": SORTS[sort],
+    }
+    if min_price is not None:
+        params["search[filter_float_price:from]"] = min_price
+    if max_price is not None:
+        params["search[filter_float_price:to]"] = max_price
     try:
-        response = requests.get(url, timeout=10, impersonate="chrome")
+        response = requests.get(url, params=params, timeout=10, impersonate="chrome")
     except Exception as e:
         print("помилка запиту:", e)
         return []
@@ -86,3 +101,7 @@ def download_photo(url):
     if response.status_code == 200:
         return response.content
     return None
+
+if __name__ == "__main__":
+    for ad in scrape("помада", min_price=200, max_price=500, sort="cheap")[:5]:
+        print(ad["price"], ad["name"])
