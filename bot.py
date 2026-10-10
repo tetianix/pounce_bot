@@ -36,14 +36,14 @@ user_results = {}
 
 
 def parse_query(text):
-    words = text.split(" ")
+    words = text.split()
     results = []
     max_price = None
     min_price = None
     for word in words:
-        if word.startswith("<"):
+        if word.startswith("<") and word[1:].isdecimal():
             max_price = int(word[1:])
-        elif word.startswith(">"):
+        elif word.startswith(">") and word[1:].isdecimal():
             min_price = int(word[1:])
         else:
             results.append(word)
