@@ -155,10 +155,9 @@ async def send_ad_card(chat_id, ad, prefix=""):
         await bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard, parse_mode="HTML")
 
 
-async def run_search(message, text):
-    query, max_price, min_price = parse_query(text)
+async def run_search(message, query, min_price=None, max_price=None, sort="new"):
     await message.answer("Шукаю...")
-    ads = search(query)
+    ads = search(query, min_price=min_price, max_price=max_price, sort=sort)
     if max_price is not None or min_price is not None:
         ads = filter_by_price(ads, max_price=max_price, min_price=min_price)
     ads.sort(key=lambda ad: ad["promoted"])
@@ -208,7 +207,8 @@ async def search_handler(message: Message):
     if len(parts) != 2:
         await message.answer("Напиши що шукати: /search товар")
         return
-    await run_search(message, parts[1])
+    query, max_price, min_price = parse_query(parts[1])
+    await run_search(message, query, min_price, max_price)
 
 
 @dp.message(Command("watch"))
@@ -400,7 +400,8 @@ async def text_handler(message: Message):
     if message.text.startswith("/"):
         await message.answer("Не знаю такої команди 🐾")
         return
-    await run_search(message, message.text)
+    query, max_price, min_price = parse_query(message.text)
+    await run_search(message, query, min_price, max_price)
 
 
 async def main():
