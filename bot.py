@@ -195,9 +195,9 @@ async def check_watches():
         query = watch["query"]
         max_price = watch["max_price"]
         min_price = watch["min_price"]
-        ads = search(query)
         max_price = None if max_price == 0 else max_price
         min_price = None if min_price == 0 else min_price
+        ads = search(query, min_price=min_price, max_price=max_price)
         ads = filter_by_price(ads, max_price=max_price, min_price=min_price)
         for ad in ads:
             if not ad_exists(ad["id"], ad["source"]):
