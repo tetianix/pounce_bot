@@ -25,7 +25,7 @@ import html
 import os
 
 CHECK_INTERVAL_MINUTES = 15
-WEBAPP_URL = "https://tetianix.github.io/pounce-webapp/"
+WEBAPP_URL = "https://tetianix.github.io/pounce_webapp/"
 
 load_dotenv()
 token = os.getenv("BOT_TOKEN")
