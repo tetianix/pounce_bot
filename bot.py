@@ -178,7 +178,10 @@ async def run_search(message, query, min_price=None, max_price=None, sort="new")
         ads = filter_by_price(ads, max_price=max_price, min_price=min_price)
     ads.sort(key=lambda ad: ad["promoted"])
     if not ads:
-        await message.answer("Нічого не знайдено")
+        if min_price is not None or max_price is not None:
+            await message.answer("Нічого не знайдено 😿\nСпробуй розширити діапазон цін або змінити запит")
+        else:
+            await message.answer("Нічого не знайдено 😿\nСпробуй коротший запит або інші слова")
         return
     for ad in ads:
         save_ad(ad, query)
