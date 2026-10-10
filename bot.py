@@ -27,13 +27,25 @@ import os
 
 CHECK_INTERVAL_MINUTES = 15
 CAPTION_LIMIT = 1024
+MAX_STORED_RESULTS = 500
+STALE_TEXT = "Це старий пошук, зроби новий 🐾"
 WEBAPP_URL = "https://tetianix.github.io/pounce_webapp/"
 
 load_dotenv()
 token = os.getenv("BOT_TOKEN")
 bot = Bot(token=token)
 dp = Dispatcher()
-user_results = {}
+message_results = {}
+
+
+def save_results(message, state):
+    message_results[(message.chat.id, message.message_id)] = state
+    while len(message_results) > MAX_STORED_RESULTS:
+        del message_results[next(iter(message_results))]
+
+
+def get_results(callback):
+    return message_results.get((callback.message.chat.id, callback.message.message_id))
 
 
 def parse_price(value):
@@ -242,15 +254,14 @@ async def run_search(message, query, min_price=None, max_price=None, sort="new",
         text, keyboard = build_ad_card(ads[0], 0, len(ads), watching=watching)
         card = await message.answer_photo(photo=get_ad_photo(ads[0]), caption=text, reply_markup=keyboard,
                                           parse_mode="HTML")
-        user_results[message.from_user.id] = {
+        save_results(card, {
             "ads": ads,
             "mode": "search",
             "query": query,
             "min_price": min_price,
             "max_price": max_price,
             "watching": watching,
-            "message_id": card.message_id,
-        }
+        })
     finally:
         await status.delete()
 
@@ -306,18 +317,19 @@ async def saved_handler(message: Message):
     if not ads:
         await message.answer("Обране порожнє")
         return
-    user_results[message.from_user.id] = {"ads": ads, "mode": "fav"}
     text, keyboard = build_ad_card(ads[0], 0, len(ads), "fav")
-    await message.answer_photo(photo=get_ad_photo(ads[0]), caption=text, reply_markup=keyboard, parse_mode="HTML")
+    card = await message.answer_photo(photo=get_ad_photo(ads[0]), caption=text, reply_markup=keyboard,
+                                      parse_mode="HTML")
+    save_results(card, {"ads": ads, "mode": "fav"})
 
 
 @dp.callback_query(F.data.startswith("nav:"))
 async def nav_handler(callback: CallbackQuery):
     parts = callback.data.split(":")
     index = int(parts[1])
-    state = user_results.get(callback.from_user.id)
+    state = get_results(callback)
     if state is None:
-        await callback.answer("Пошук застарів, зроби новий")
+        await callback.answer(STALE_TEXT)
         return
     ads = state["ads"]
     if index < 0 or index >= len(ads):
@@ -336,9 +348,9 @@ async def nav_handler(callback: CallbackQuery):
 async def info_handler(callback: CallbackQuery):
     parts = callback.data.split(":")
     index = int(parts[1])
-    state = user_results.get(callback.from_user.id)
+    state = get_results(callback)
     if state is None or index >= len(state["ads"]):
-        await callback.answer("Пошук застарів, зроби новий")
+        await callback.answer(STALE_TEXT)
         return
     ad = state["ads"][index]
 
@@ -348,7 +360,6 @@ async def info_handler(callback: CallbackQuery):
         "index": index,
         "photos": details["photos"],
         "caption": text,
-        "message_id": callback.message.message_id,
     }
     keyboard = build_info_keyboard(ad, index, 0, len(details["photos"]))
     await callback.message.edit_caption(caption=text, reply_markup=keyboard, parse_mode="HTML")
@@ -358,10 +369,10 @@ async def info_handler(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("photo:"))
 async def photo_handler(callback: CallbackQuery):
     photo_index = int(callback.data.split(":")[1])
-    state = user_results.get(callback.from_user.id)
+    state = get_results(callback)
     details = state.get("details") if state else None
-    if details is None or details["message_id"] != callback.message.message_id:
-        await callback.answer("Пошук застарів, зроби новий")
+    if details is None:
+        await callback.answer(STALE_TEXT)
         return
     photos = details["photos"]
     if photo_index < 0 or photo_index >= len(photos):
@@ -418,9 +429,9 @@ async def fav_handler(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "watch")
 async def watch_button_handler(callback: CallbackQuery):
-    state = user_results.get(callback.from_user.id)
-    if state is None or state["mode"] != "search" or state.get("message_id") != callback.message.message_id:
-        await callback.answer("Пошук застарів, зроби новий")
+    state = get_results(callback)
+    if state is None or state["mode"] != "search":
+        await callback.answer(STALE_TEXT)
         return
     save_watch(callback.from_user.id, state["query"], state["max_price"], state["min_price"])
     state["watching"] = True
@@ -435,15 +446,16 @@ async def watch_button_handler(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("favdel:"))
 async def favdel_handler(callback: CallbackQuery):
     index = int(callback.data.split(":")[1])
-    state = user_results.get(callback.from_user.id)
+    state = get_results(callback)
     if state is None or state["mode"] != "fav" or index >= len(state["ads"]):
-        await callback.answer("Список застарів, відкрий обране знову")
+        await callback.answer(STALE_TEXT)
         return
     ads = state["ads"]
     ad = ads.pop(index)
     delete_favorite(callback.from_user.id, ad["id"], ad["source"])
 
     if not ads:
+        message_results.pop((callback.message.chat.id, callback.message.message_id), None)
         await callback.message.delete()
         await callback.message.answer("Обране порожнє")
         await callback.answer("Прибрано")
