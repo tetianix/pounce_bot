@@ -103,13 +103,13 @@ def format_ad_text(ad):
     return f"<b>{name}</b>\n💰 {price_text}\n📍 {town}\n🕒 <i>{date}</i>"
 
 
-def build_ad_card(ad, index, total, mode="search"):
+def build_ad_card(ad, index, total, mode="search", watching=False):
     text = format_ad_text(ad)
     if mode == "fav":
         action_button = InlineKeyboardButton(text="🗑 Прибрати", callback_data=f"favdel:{index}")
     else:
         action_button = InlineKeyboardButton(text="⭐ В обране", callback_data=f"fav:{ad['source']}:{ad['id']}")
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+    rows = [
         [
             InlineKeyboardButton(text="◀️", callback_data=f"nav:{index - 1}"),
             InlineKeyboardButton(text=f"{index + 1} / {total}", callback_data="noop"),
@@ -119,11 +119,21 @@ def build_ad_card(ad, index, total, mode="search"):
             InlineKeyboardButton(text="Детальніше", callback_data=f"info:{index}"),
             action_button,
         ],
-        [
-            InlineKeyboardButton(text="🔗 Відкрити на OLX", url=ad['link']),
-        ],
-    ])
-    return text, keyboard
+    ]
+    if mode == "search":
+        if watching:
+            rows.append([InlineKeyboardButton(text="✅ Стежу", callback_data="noop")])
+        else:
+            rows.append([InlineKeyboardButton(text="🔔 Стежити", callback_data="watch")])
+    rows.append([InlineKeyboardButton(text="🔗 Відкрити на OLX", url=ad['link'])])
+    return text, InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def replace_button(markup, callback_data, new_button):
+    rows = []
+    for row in markup.inline_keyboard:
+        rows.append([new_button if button.callback_data == callback_data else button for button in row])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def track_price(ad):
     if ad["price"] is None:
@@ -161,7 +171,7 @@ async def send_ad_card(chat_id, ad, prefix="", query=None):
         await bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard, parse_mode="HTML")
 
 
-async def run_search(message, query, min_price=None, max_price=None, sort="new"):
+async def run_search(message, query, min_price=None, max_price=None, sort="new", watching=False):
     status = await message.answer("Шукаю...")
     try:
         ads = search(query, min_price=min_price, max_price=max_price, sort=sort)
@@ -177,10 +187,18 @@ async def run_search(message, query, min_price=None, max_price=None, sort="new")
         for ad in ads:
             save_ad(ad, query)
             track_price(ad)
-        user_results[message.from_user.id] = {"ads": ads, "mode": "search"}
-        text, keyboard = build_ad_card(ads[0], 0, len(ads))
-        await message.answer_photo(photo=get_ad_photo(ads[0]), caption=text, reply_markup=keyboard,
-                                   parse_mode="HTML")
+        text, keyboard = build_ad_card(ads[0], 0, len(ads), watching=watching)
+        card = await message.answer_photo(photo=get_ad_photo(ads[0]), caption=text, reply_markup=keyboard,
+                                          parse_mode="HTML")
+        user_results[message.from_user.id] = {
+            "ads": ads,
+            "mode": "search",
+            "query": query,
+            "min_price": min_price,
+            "max_price": max_price,
+            "watching": watching,
+            "message_id": card.message_id,
+        }
     finally:
         await status.delete()
 
@@ -254,7 +272,7 @@ async def nav_handler(callback: CallbackQuery):
         await callback.answer("Це край списку")
         return
     ad = ads[index]
-    text, keyboard = build_ad_card(ad, index, len(ads), state["mode"])
+    text, keyboard = build_ad_card(ad, index, len(ads), state["mode"], state.get("watching", False))
     await callback.message.edit_media(
         media=InputMediaPhoto(media=get_ad_photo(ad), caption=text, parse_mode="HTML"),
         reply_markup=keyboard
@@ -320,18 +338,27 @@ async def fav_handler(callback: CallbackQuery):
     source = parts[1]
     ad_id = parts[2]
     save_favorite(callback.from_user.id, ad_id, source)
-
-    new_rows = []
-    for row in callback.message.reply_markup.inline_keyboard:
-        new_row = []
-        for button in row:
-            if button.callback_data == callback.data:
-                button = InlineKeyboardButton(text="✅ В обраному", callback_data="noop")
-            new_row.append(button)
-        new_rows.append(new_row)
-    await callback.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=new_rows))
-
+    new_button = InlineKeyboardButton(text="✅ В обраному", callback_data="noop")
+    await callback.message.edit_reply_markup(
+        reply_markup=replace_button(callback.message.reply_markup, callback.data, new_button)
+    )
     await callback.answer("⭐ Збережено")
+
+
+@dp.callback_query(F.data == "watch")
+async def watch_button_handler(callback: CallbackQuery):
+    state = user_results.get(callback.from_user.id)
+    if state is None or state["mode"] != "search" or state.get("message_id") != callback.message.message_id:
+        await callback.answer("Пошук застарів, зроби новий")
+        return
+    save_watch(callback.from_user.id, state["query"], state["max_price"], state["min_price"])
+    state["watching"] = True
+    new_button = InlineKeyboardButton(text="✅ Стежу", callback_data="noop")
+    await callback.message.edit_reply_markup(
+        reply_markup=replace_button(callback.message.reply_markup, "watch", new_button)
+    )
+    await callback.message.answer(f"Стежу за «{state['query']}»")
+    await callback.answer()
 
 
 @dp.callback_query(F.data.startswith("favdel:"))
@@ -414,10 +441,13 @@ async def webapp_handler(message: Message):
     if not isinstance(sort, str) or sort not in SORTS:
         sort = "new"
 
-    await run_search(message, query, min_price, max_price, sort)
-
-    if data.get("watch") is True:
+    watching = data.get("watch") is True
+    if watching:
         save_watch(message.from_user.id, query, max_price, min_price)
+
+    await run_search(message, query, min_price, max_price, sort, watching)
+
+    if watching:
         await message.answer(f"Стежу за «{query}»")
 
 
