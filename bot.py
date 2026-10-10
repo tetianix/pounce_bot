@@ -463,6 +463,7 @@ async def main():
     scheduler = AsyncIOScheduler()
     scheduler.add_job(check_watches, "interval", minutes=CHECK_INTERVAL_MINUTES)
     scheduler.start()
+    await bot.delete_my_commands()
     await dp.start_polling(bot)
 
 
