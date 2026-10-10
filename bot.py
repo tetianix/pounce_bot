@@ -92,15 +92,19 @@ def build_watch_card(watch):
     return text, keyboard
 
 
-def build_ad_card(ad, index, total, mode="search"):
+def format_ad_text(ad):
     name = html.escape(ad['name'])
-    town = html.escape(ad['town'])
-    date = html.escape(ad['published_date'])
+    town = html.escape(ad['town'] or "")
+    date = html.escape(ad['published_date'] or "")
     price_text = f"{ad['price']} грн" if ad['price'] is not None else "Ціна не вказана"
     max_price = get_max_price(ad['id'], ad['source'])
     if ad['price'] is not None and max_price is not None and max_price > ad['price']:
         price_text += f"  📉 було {max_price}"
-    text = f"<b>{name}</b>\n💰 {price_text}\n📍 {town}\n🕒 <i>{date}</i>"
+    return f"<b>{name}</b>\n💰 {price_text}\n📍 {town}\n🕒 <i>{date}</i>"
+
+
+def build_ad_card(ad, index, total, mode="search"):
+    text = format_ad_text(ad)
     if mode == "fav":
         action_button = InlineKeyboardButton(text="🗑 Прибрати", callback_data=f"favdel:{index}")
     else:
@@ -133,30 +137,22 @@ def track_price(ad):
         return last_price
     return None
 
-async def send_ad_card(chat_id, ad, prefix="", in_favorites=False):
-    photo = ad['photo']
-    if photo is None or not photo.startswith("http"):
-        details = scrape_details(ad['link'])
-        if details["photos"]:
-            photo = details["photos"][0]
-    text = f"{prefix}{ad['name']}\n{ad['price']} грн\n{ad['town']}\n{ad['link']}"
-    fav_text = "🗑 Прибрати" if in_favorites else "⭐"
-    fav_action = "unfav" if in_favorites else "fav"
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="Детальніше", callback_data=f"details:{ad['source']}:{ad['id']}"),
-        InlineKeyboardButton(text=fav_text, callback_data=f"{fav_action}:{ad['source']}:{ad['id']}")
-    ]])
-    if photo is not None and photo.startswith("http"):
-        try:
-            await bot.send_photo(chat_id=chat_id, photo=photo, caption=text, reply_markup=keyboard)
-        except Exception:
-            await asyncio.sleep(1)
-            try:
-                await bot.send_photo(chat_id=chat_id, photo=photo, caption=text, reply_markup=keyboard)
-            except Exception:
-                await bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
-    else:
-        await bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
+async def send_ad_card(chat_id, ad, prefix=""):
+    text = f"<b>{prefix}</b>\n{format_ad_text(ad)}" if prefix else format_ad_text(ad)
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="Детальніше", callback_data=f"details:{ad['source']}:{ad['id']}"),
+            InlineKeyboardButton(text="⭐ В обране", callback_data=f"fav:{ad['source']}:{ad['id']}"),
+        ],
+        [
+            InlineKeyboardButton(text="🔗 Відкрити на OLX", url=ad['link']),
+        ],
+    ])
+    try:
+        await bot.send_photo(chat_id=chat_id, photo=get_ad_photo(ad), caption=text,
+                             reply_markup=keyboard, parse_mode="HTML")
+    except Exception:
+        await bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard, parse_mode="HTML")
 
 
 async def run_search(message, text):
@@ -190,11 +186,11 @@ async def check_watches():
         ads = filter_by_price(ads, max_price=max_price, min_price=min_price)
         for ad in ads:
             if not ad_exists(ad["id"], ad["source"]):
-                await send_ad_card(user_id, ad, "🆕 Нове оголошення\n")
+                await send_ad_card(user_id, ad, "🆕 Нове оголошення")
             old_price = track_price(ad)
             if old_price is not None:
                 prefix = "📉 Подешевшало" if ad["price"] < old_price else "📈 Подорожчало"
-                await send_ad_card(user_id, ad, f"{prefix} було {old_price} грн\n")
+                await send_ad_card(user_id, ad, f"{prefix} було {old_price} грн")
             save_ad(ad, query)
 
 
