@@ -19,9 +19,10 @@ from filters import filter_by_price
 from database import (save_ad, get_link, save_watch, get_active_watches, ad_exists, get_user_watches,
                       get_watch, delete_watch, toggle_watch, get_last_price, save_price, save_favorite, get_favorites,
                       delete_favorite, get_max_price)
-from scrapers.olx import scrape_details, download_photo
+from scrapers.olx import scrape_details, download_photo, SORTS
 import asyncio
 import html
+import json
 import os
 
 CHECK_INTERVAL_MINUTES = 15
@@ -48,6 +49,14 @@ def parse_query(text):
             results.append(word)
     query = " ".join(results)
     return query, max_price, min_price
+
+
+def parse_price(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if value <= 0:
+        return None
+    return int(value)
 
 
 def get_ad_photo(ad):
@@ -400,6 +409,37 @@ async def pause_handler(callback: CallbackQuery):
     text, keyboard = build_watch_card(watch)
     await callback.message.edit_text(text, reply_markup=keyboard)
     await callback.answer()
+
+
+@dp.message(F.web_app_data)
+async def webapp_handler(message: Message):
+    try:
+        data = json.loads(message.web_app_data.data)
+    except json.JSONDecodeError:
+        data = None
+    if not isinstance(data, dict):
+        await message.answer("Не вдалося прочитати фільтри")
+        return
+
+    query = data.get("query")
+    query = query.strip() if isinstance(query, str) else ""
+    if not query:
+        await message.answer("Напиши, що шукати 🐾")
+        return
+
+    min_price = parse_price(data.get("min_price"))
+    max_price = parse_price(data.get("max_price"))
+    if min_price is not None and max_price is not None and min_price > max_price:
+        min_price, max_price = max_price, min_price
+    sort = data.get("sort")
+    if not isinstance(sort, str) or sort not in SORTS:
+        sort = "new"
+
+    await run_search(message, query, min_price, max_price, sort)
+
+    if data.get("watch") is True:
+        save_watch(message.from_user.id, query, max_price, min_price)
+        await message.answer(f"Стежу за «{query}»")
 
 
 @dp.message(F.text)
