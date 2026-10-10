@@ -20,6 +20,7 @@ from database import (save_ad, get_link, save_watch, get_active_watches, ad_exis
                       delete_favorite)
 from scrapers.olx import scrape_details, download_photo
 import asyncio
+import html
 import os
 
 CHECK_INTERVAL_MINUTES = 15
@@ -92,7 +93,11 @@ def build_watch_card(watch):
 
 
 def build_ad_card(ad, index, total):
-    text = f"{ad['name']}\n{ad['price']} грн\n{ad['town']}\n{ad['link']}"
+    name = html.escape(ad['name'])
+    town = html.escape(ad['town'])
+    date = html.escape(ad['published_date'])
+    price_text = f"{ad['price']} грн" if ad['price'] is not None else "Ціна не вказана"
+    text = f"<b>{name}</b>\n💰 {price_text}\n📍 {town}\n🕒 <i>{date}</i>"
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="◀️", callback_data=f"nav:{index - 1}"),
@@ -101,7 +106,10 @@ def build_ad_card(ad, index, total):
         ],
         [
             InlineKeyboardButton(text="Детальніше", callback_data=f"info:{index}"),
-            InlineKeyboardButton(text="⭐", callback_data=f"fav:{ad['source']}:{ad['id']}"),
+            InlineKeyboardButton(text="⭐ В обране", callback_data=f"fav:{ad['source']}:{ad['id']}"),
+        ],
+        [
+            InlineKeyboardButton(text="🔗 Відкрити на OLX", url=ad['link']),
         ],
     ])
     return text, keyboard
@@ -146,7 +154,7 @@ async def run_search(message, text):
         save_ad(ad, query)
     user_results[message.from_user.id] = ads
     text, keyboard = build_ad_card(ads[0], 0, len(ads))
-    await message.answer_photo(photo=get_ad_photo(ads[0]), caption=text, reply_markup=keyboard)
+    await message.answer_photo(photo=get_ad_photo(ads[0]), caption=text, reply_markup=keyboard, parse_mode="HTML")
 
 
 async def check_watches():
@@ -242,7 +250,7 @@ async def nav_handler(callback: CallbackQuery):
     ad = ads[index]
     text, keyboard = build_ad_card(ad, index, len(ads))
     await callback.message.edit_media(
-        media=InputMediaPhoto(media=get_ad_photo(ad), caption=text),
+        media=InputMediaPhoto(media=get_ad_photo(ad), caption=text, parse_mode="HTML"),
         reply_markup=keyboard
     )
     await callback.answer()
@@ -306,6 +314,17 @@ async def fav_handler(callback: CallbackQuery):
     source = parts[1]
     ad_id = parts[2]
     save_favorite(callback.from_user.id, ad_id, source)
+
+    new_rows = []
+    for row in callback.message.reply_markup.inline_keyboard:
+        new_row = []
+        for button in row:
+            if button.callback_data == callback.data:
+                button = InlineKeyboardButton(text="✅ В обраному", callback_data="noop")
+            new_row.append(button)
+        new_rows.append(new_row)
+    await callback.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=new_rows))
+
     await callback.answer("⭐ Збережено")
 
 

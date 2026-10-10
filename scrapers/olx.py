@@ -64,13 +64,16 @@ def scrape_details(link):
         return {"description": None, "photos": []}
     if response.status_code == 200:
         soup = BeautifulSoup(response.content, 'html.parser')
-        description = soup.select_one('[data-cy="ad_description"] div')
+        description = soup.select_one('[data-cy="ad_description"]')
         photo = soup.select('[data-testid="ad-photo"] img')
         photos = []
         for img in photo:
-            cleaned = clean_photo(img['src'])
-            photos.append(cleaned)
-        text = description.text if description else None
+            src = img.get('src')
+            if src:
+                photos.append(clean_photo(src))
+        text = description.get_text("\n", strip=True) if description else None
+        if text and text.startswith("Опис"):
+            text = text[len("Опис"):].strip()
         return {"description": text, "photos": photos}
     return {"description": None, "photos": []}
 
