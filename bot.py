@@ -35,22 +35,6 @@ dp = Dispatcher()
 user_results = {}
 
 
-def parse_query(text):
-    words = text.split()
-    results = []
-    max_price = None
-    min_price = None
-    for word in words:
-        if word.startswith("<") and word[1:].isdecimal():
-            max_price = int(word[1:])
-        elif word.startswith(">") and word[1:].isdecimal():
-            min_price = int(word[1:])
-        else:
-            results.append(word)
-    query = " ".join(results)
-    return query, max_price, min_price
-
-
 def parse_price(value):
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
@@ -442,8 +426,7 @@ async def text_handler(message: Message):
     if message.text.startswith("/"):
         await message.answer("Не знаю такої команди 🐾")
         return
-    query, max_price, min_price = parse_query(message.text)
-    await run_search(message, query, min_price, max_price)
+    await run_search(message, message.text.strip())
 
 
 async def main():
