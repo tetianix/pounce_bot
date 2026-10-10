@@ -153,8 +153,14 @@ def track_price(ad):
         return last_price
     return None
 
-async def send_ad_card(chat_id, ad, prefix=""):
-    text = f"<b>{prefix}</b>\n{format_ad_text(ad)}" if prefix else format_ad_text(ad)
+async def send_ad_card(chat_id, ad, prefix="", query=None):
+    lines = []
+    if prefix:
+        lines.append(f"<b>{prefix}</b>")
+    if query:
+        lines.append(f"🔍 за пошуком «{html.escape(query)}»")
+    lines.append(format_ad_text(ad))
+    text = "\n".join(lines)
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="Детальніше", callback_data=f"details:{ad['source']}:{ad['id']}"),
@@ -208,11 +214,11 @@ async def check_watches():
         ads = filter_by_price(ads, max_price=max_price, min_price=min_price)
         for ad in ads:
             if not ad_exists(ad["id"], ad["source"]):
-                await send_ad_card(user_id, ad, "🆕 Нове оголошення")
+                await send_ad_card(user_id, ad, "🆕 Нове оголошення", query)
             old_price = track_price(ad)
             if old_price is not None:
                 prefix = "📉 Подешевшало" if ad["price"] < old_price else "📈 Подорожчало"
-                await send_ad_card(user_id, ad, f"{prefix} було {old_price} грн")
+                await send_ad_card(user_id, ad, f"{prefix} було {old_price} грн", query)
             save_ad(ad, query)
 
 
