@@ -26,6 +26,7 @@ import json
 import os
 
 CHECK_INTERVAL_MINUTES = 15
+CAPTION_LIMIT = 1024
 WEBAPP_URL = "https://tetianix.github.io/pounce_webapp/"
 
 load_dotenv()
@@ -119,14 +120,24 @@ def format_ad_text(ad):
     return f"<b>{name}</b>\n💰 {format_price_text(ad)}\n📍 {town}\n🕒 <i>{date}</i>"
 
 
+def utf16_len(text):
+    return len(text.encode("utf-16-le")) // 2
+
+
 def build_info_caption(ad, description):
-    name = html.escape(ad['name'])
-    town = html.escape(ad['town'] or "")
-    if description:
-        description_text = f"<blockquote expandable>{html.escape(description)}</blockquote>"
-    else:
-        description_text = "Продавець не додав опис"
-    return f"<b>{name}</b>\n💰 {format_price_text(ad)}\n📍 {town}\n\n{description_text}"
+    name = ad['name']
+    town = ad['town'] or ""
+    price_text = format_price_text(ad)
+    header = f"<b>{html.escape(name)}</b>\n💰 {price_text}\n📍 {html.escape(town)}\n\n"
+    if not description:
+        return header + "Продавець не додав опис"
+    available = CAPTION_LIMIT - utf16_len(f"{name}\n💰 {price_text}\n📍 {town}\n\n")
+    if utf16_len(description) > available:
+        description = description[:available - 1]
+        while utf16_len(description) > available - 1:
+            description = description[:-1]
+        description = description.rstrip() + "…"
+    return header + f"<blockquote expandable>{html.escape(description)}</blockquote>"
 
 
 def build_ad_card(ad, index, total, mode="search", watching=False):
