@@ -172,23 +172,27 @@ async def send_ad_card(chat_id, ad, prefix=""):
 
 
 async def run_search(message, query, min_price=None, max_price=None, sort="new"):
-    await message.answer("Шукаю...")
-    ads = search(query, min_price=min_price, max_price=max_price, sort=sort)
-    if max_price is not None or min_price is not None:
-        ads = filter_by_price(ads, max_price=max_price, min_price=min_price)
-    ads.sort(key=lambda ad: ad["promoted"])
-    if not ads:
-        if min_price is not None or max_price is not None:
-            await message.answer("Нічого не знайдено 😿\nСпробуй розширити діапазон цін або змінити запит")
-        else:
-            await message.answer("Нічого не знайдено 😿\nСпробуй коротший запит або інші слова")
-        return
-    for ad in ads:
-        save_ad(ad, query)
-        track_price(ad)
-    user_results[message.from_user.id] = {"ads": ads, "mode": "search"}
-    text, keyboard = build_ad_card(ads[0], 0, len(ads))
-    await message.answer_photo(photo=get_ad_photo(ads[0]), caption=text, reply_markup=keyboard, parse_mode="HTML")
+    status = await message.answer("Шукаю...")
+    try:
+        ads = search(query, min_price=min_price, max_price=max_price, sort=sort)
+        if max_price is not None or min_price is not None:
+            ads = filter_by_price(ads, max_price=max_price, min_price=min_price)
+        ads.sort(key=lambda ad: ad["promoted"])
+        if not ads:
+            if min_price is not None or max_price is not None:
+                await message.answer("Нічого не знайдено 😿\nСпробуй розширити діапазон цін або змінити запит")
+            else:
+                await message.answer("Нічого не знайдено 😿\nСпробуй коротший запит або інші слова")
+            return
+        for ad in ads:
+            save_ad(ad, query)
+            track_price(ad)
+        user_results[message.from_user.id] = {"ads": ads, "mode": "search"}
+        text, keyboard = build_ad_card(ads[0], 0, len(ads))
+        await message.answer_photo(photo=get_ad_photo(ads[0]), caption=text, reply_markup=keyboard,
+                                   parse_mode="HTML")
+    finally:
+        await status.delete()
 
 
 async def check_watches():
