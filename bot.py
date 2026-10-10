@@ -17,7 +17,7 @@ from core import search
 from filters import filter_by_price
 from database import (save_ad, get_link, save_watch, get_active_watches, ad_exists, get_user_watches,
                       get_watch, delete_watch, toggle_watch, get_last_price, save_price, save_favorite, get_favorites,
-                      delete_favorite)
+                      delete_favorite, get_max_price)
 from scrapers.olx import scrape_details, download_photo
 import asyncio
 import html
@@ -92,12 +92,19 @@ def build_watch_card(watch):
     return text, keyboard
 
 
-def build_ad_card(ad, index, total):
+def build_ad_card(ad, index, total, mode="search"):
     name = html.escape(ad['name'])
     town = html.escape(ad['town'])
     date = html.escape(ad['published_date'])
     price_text = f"{ad['price']} грн" if ad['price'] is not None else "Ціна не вказана"
+    max_price = get_max_price(ad['id'], ad['source'])
+    if ad['price'] is not None and max_price is not None and max_price > ad['price']:
+        price_text += f"  📉 було {max_price}"
     text = f"<b>{name}</b>\n💰 {price_text}\n📍 {town}\n🕒 <i>{date}</i>"
+    if mode == "fav":
+        action_button = InlineKeyboardButton(text="🗑 Прибрати", callback_data=f"favdel:{index}")
+    else:
+        action_button = InlineKeyboardButton(text="⭐ В обране", callback_data=f"fav:{ad['source']}:{ad['id']}")
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="◀️", callback_data=f"nav:{index - 1}"),
@@ -106,7 +113,7 @@ def build_ad_card(ad, index, total):
         ],
         [
             InlineKeyboardButton(text="Детальніше", callback_data=f"info:{index}"),
-            InlineKeyboardButton(text="⭐ В обране", callback_data=f"fav:{ad['source']}:{ad['id']}"),
+            action_button,
         ],
         [
             InlineKeyboardButton(text="🔗 Відкрити на OLX", url=ad['link']),
@@ -114,6 +121,17 @@ def build_ad_card(ad, index, total):
     ])
     return text, keyboard
 
+def track_price(ad):
+    if ad["price"] is None:
+        return None
+    last_price = get_last_price(ad["id"], ad["source"])
+    if last_price is None:
+        save_price(ad["id"], ad["source"], ad["price"])
+        return None
+    if last_price != ad["price"]:
+        save_price(ad["id"], ad["source"], ad["price"])
+        return last_price
+    return None
 
 async def send_ad_card(chat_id, ad, prefix="", in_favorites=False):
     photo = ad['photo']
@@ -147,12 +165,14 @@ async def run_search(message, text):
     ads = search(query)
     if max_price is not None or min_price is not None:
         ads = filter_by_price(ads, max_price=max_price, min_price=min_price)
+    ads.sort(key=lambda ad: ad["promoted"])
     if not ads:
         await message.answer("Нічого не знайдено")
         return
     for ad in ads:
         save_ad(ad, query)
-    user_results[message.from_user.id] = ads
+        track_price(ad)
+    user_results[message.from_user.id] = {"ads": ads, "mode": "search"}
     text, keyboard = build_ad_card(ads[0], 0, len(ads))
     await message.answer_photo(photo=get_ad_photo(ads[0]), caption=text, reply_markup=keyboard, parse_mode="HTML")
 
@@ -171,17 +191,10 @@ async def check_watches():
         for ad in ads:
             if not ad_exists(ad["id"], ad["source"]):
                 await send_ad_card(user_id, ad, "🆕 Нове оголошення\n")
-            if ad["price"] is not None:
-                last_price = get_last_price(ad["id"], ad["source"])
-                if last_price is None:
-                    save_price(ad["id"], ad["source"], ad["price"])
-                elif last_price != ad["price"]:
-                    save_price(ad["id"], ad["source"], ad["price"])
-                    if ad["price"] < last_price:
-                        prefix = "📉 Подешевшало"
-                    else:
-                        prefix = "📈 Подорожчало"
-                    await send_ad_card(user_id, ad, f"{prefix} було {last_price} грн\n")
+            old_price = track_price(ad)
+            if old_price is not None:
+                prefix = "📉 Подешевшало" if ad["price"] < old_price else "📈 Подорожчало"
+                await send_ad_card(user_id, ad, f"{prefix} було {old_price} грн\n")
             save_ad(ad, query)
 
 
@@ -228,27 +241,29 @@ async def watches_handler(message: Message):
 @dp.message(Command("saved"))
 @dp.message(F.text == "⭐ Обране")
 async def saved_handler(message: Message):
-    ads = get_favorites(message.from_user.id)
+    ads = list(get_favorites(message.from_user.id))
     if not ads:
         await message.answer("Обране порожнє")
         return
-    for ad in ads:
-        await send_ad_card(message.chat.id, ad, in_favorites=True)
+    user_results[message.from_user.id] = {"ads": ads, "mode": "fav"}
+    text, keyboard = build_ad_card(ads[0], 0, len(ads), "fav")
+    await message.answer_photo(photo=get_ad_photo(ads[0]), caption=text, reply_markup=keyboard, parse_mode="HTML")
 
 
 @dp.callback_query(F.data.startswith("nav:"))
 async def nav_handler(callback: CallbackQuery):
     parts = callback.data.split(":")
     index = int(parts[1])
-    ads = user_results.get(callback.from_user.id)
-    if ads is None:
+    state = user_results.get(callback.from_user.id)
+    if state is None:
         await callback.answer("Пошук застарів, зроби новий")
         return
+    ads = state["ads"]
     if index < 0 or index >= len(ads):
         await callback.answer("Це край списку")
         return
     ad = ads[index]
-    text, keyboard = build_ad_card(ad, index, len(ads))
+    text, keyboard = build_ad_card(ad, index, len(ads), state["mode"])
     await callback.message.edit_media(
         media=InputMediaPhoto(media=get_ad_photo(ad), caption=text, parse_mode="HTML"),
         reply_markup=keyboard
@@ -260,11 +275,11 @@ async def nav_handler(callback: CallbackQuery):
 async def info_handler(callback: CallbackQuery):
     parts = callback.data.split(":")
     index = int(parts[1])
-    ads = user_results.get(callback.from_user.id)
-    if ads is None:
+    state = user_results.get(callback.from_user.id)
+    if state is None or index >= len(state["ads"]):
         await callback.answer("Пошук застарів, зроби новий")
         return
-    ad = ads[index]
+    ad = state["ads"][index]
 
     details = scrape_details(ad['link'])
     description = details["description"] or "Опис відсутній"
@@ -326,6 +341,32 @@ async def fav_handler(callback: CallbackQuery):
     await callback.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=new_rows))
 
     await callback.answer("⭐ Збережено")
+
+
+@dp.callback_query(F.data.startswith("favdel:"))
+async def favdel_handler(callback: CallbackQuery):
+    index = int(callback.data.split(":")[1])
+    state = user_results.get(callback.from_user.id)
+    if state is None or state["mode"] != "fav" or index >= len(state["ads"]):
+        await callback.answer("Список застарів, відкрий обране знову")
+        return
+    ads = state["ads"]
+    ad = ads.pop(index)
+    delete_favorite(callback.from_user.id, ad["id"], ad["source"])
+
+    if not ads:
+        await callback.message.delete()
+        await callback.message.answer("Обране порожнє")
+        await callback.answer("Прибрано")
+        return
+
+    index = min(index, len(ads) - 1)
+    text, keyboard = build_ad_card(ads[index], index, len(ads), "fav")
+    await callback.message.edit_media(
+        media=InputMediaPhoto(media=get_ad_photo(ads[index]), caption=text, parse_mode="HTML"),
+        reply_markup=keyboard
+    )
+    await callback.answer("Прибрано з обраного")
 
 
 @dp.callback_query(F.data.startswith("unfav:"))

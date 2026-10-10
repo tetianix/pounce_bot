@@ -19,7 +19,7 @@ def clean_photo(url):
     return photo
 
 def scrape(query, page=1):
-    url = f"https://www.olx.ua/uk/list/q-{query}/?page={page}"
+    url = f"https://www.olx.ua/uk/list/q-{query}/?page={page}&search[order]=created_at:desc"
     try:
         response = requests.get(url, timeout=10, impersonate="chrome")
     except Exception as e:
@@ -51,6 +51,7 @@ def scrape(query, page=1):
                     "town" : parts[0],
                     "published_date" : parts[1],
                     "photo" : photo,
+                    "promoted": "promoted" in link,
                     "link" : f"https://www.olx.ua{link}"}
             results.append(data)
         return results

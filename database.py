@@ -138,6 +138,18 @@ def get_last_price(ad_id, ad_source):
         return None
     return result[0]
 
+def get_max_price(ad_id, ad_source):
+    connection = sqlite3.connect('database.db')
+    cursor = connection.cursor()
+    cursor.execute("""
+    SELECT MAX(price) 
+    FROM price_history 
+    WHERE ad_id = ? AND ad_source = ?
+    """, (ad_id, ad_source))
+    result = cursor.fetchone()
+    connection.close()
+    return result[0]
+
 def get_user_watches(user_id):
     connection = sqlite3.connect('database.db')
     connection.row_factory = sqlite3.Row
