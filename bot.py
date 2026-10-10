@@ -11,6 +11,7 @@ from aiogram.types import (
     FSInputFile,
     ReplyKeyboardMarkup,
     KeyboardButton,
+    WebAppInfo,
 )
 from dotenv import load_dotenv
 from core import search
@@ -24,6 +25,7 @@ import html
 import os
 
 CHECK_INTERVAL_MINUTES = 15
+WEBAPP_URL = "https://tetianix.github.io/pounce-webapp/"
 
 load_dotenv()
 token = os.getenv("BOT_TOKEN")
@@ -65,10 +67,15 @@ def get_ad_photo(ad):
 
 def build_main_keyboard():
     return ReplyKeyboardMarkup(
-        keyboard=[[
-            KeyboardButton(text="📌 Мої пошуки"),
-            KeyboardButton(text="⭐ Обране"),
-        ]],
+        keyboard=[
+            [
+                KeyboardButton(text="📌 Мої пошуки"),
+                KeyboardButton(text="⭐ Обране"),
+            ],
+            [
+                KeyboardButton(text="🔍 Пошук з фільтрами", web_app=WebAppInfo(url=WEBAPP_URL)),
+            ],
+        ],
         resize_keyboard=True,
         is_persistent=True,
         input_field_placeholder="Що шукаємо? Напр. помада <500",
