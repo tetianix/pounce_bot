@@ -104,15 +104,29 @@ def build_watch_card(watch):
     return text, keyboard
 
 
-def format_ad_text(ad):
-    name = html.escape(ad['name'])
-    town = html.escape(ad['town'] or "")
-    date = html.escape(ad['published_date'] or "")
+def format_price_text(ad):
     price_text = f"{ad['price']} грн" if ad['price'] is not None else "Ціна не вказана"
     max_price = get_max_price(ad['id'], ad['source'])
     if ad['price'] is not None and max_price is not None and max_price > ad['price']:
         price_text += f"  📉 було {max_price}"
-    return f"<b>{name}</b>\n💰 {price_text}\n📍 {town}\n🕒 <i>{date}</i>"
+    return price_text
+
+
+def format_ad_text(ad):
+    name = html.escape(ad['name'])
+    town = html.escape(ad['town'] or "")
+    date = html.escape(ad['published_date'] or "")
+    return f"<b>{name}</b>\n💰 {format_price_text(ad)}\n📍 {town}\n🕒 <i>{date}</i>"
+
+
+def build_info_caption(ad, description):
+    name = html.escape(ad['name'])
+    town = html.escape(ad['town'] or "")
+    if description:
+        description_text = f"<blockquote expandable>{html.escape(description)}</blockquote>"
+    else:
+        description_text = "Продавець не додав опис"
+    return f"<b>{name}</b>\n💰 {format_price_text(ad)}\n📍 {town}\n\n{description_text}"
 
 
 def build_ad_card(ad, index, total, mode="search", watching=False):
@@ -303,17 +317,13 @@ async def info_handler(callback: CallbackQuery):
     ad = state["ads"][index]
 
     details = scrape_details(ad['link'])
-    description = details["description"] or "Опис відсутній"
-
-    text = f"{ad['name']}\n{ad['price']} грн\n\n{description}"
-    if len(text) > 1024:
-        text = text[:1020] + "..."
+    text = build_info_caption(ad, details["description"])
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔗 Відкрити на OLX", url=ad['link'])],
         [InlineKeyboardButton(text="◀️ Назад", callback_data=f"nav:{index}")],
     ])
-    await callback.message.edit_caption(caption=text, reply_markup=keyboard)
+    await callback.message.edit_caption(caption=text, reply_markup=keyboard, parse_mode="HTML")
     await callback.answer()
 
 
