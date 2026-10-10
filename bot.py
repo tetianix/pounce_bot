@@ -50,12 +50,14 @@ def get_ad_photo(ad):
         details = scrape_details(ad['link'])
         if details["photos"]:
             url = details["photos"][0]
+    return load_photo(url)
 
+
+def load_photo(url):
     if url is not None and url.startswith('http'):
         data = download_photo(url)
         if data:
             return BufferedInputFile(data, filename="photo.jpg")
-
     return FSInputFile("placeholder.jpg")
 
 
@@ -164,6 +166,19 @@ def build_ad_card(ad, index, total, mode="search", watching=False):
             rows.append([InlineKeyboardButton(text="🔔 Стежити", callback_data="watch")])
     rows.append([InlineKeyboardButton(text="🔗 Відкрити на OLX", url=ad['link'])])
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_info_keyboard(ad, index, photo_index, photo_count):
+    rows = []
+    if photo_count > 1:
+        rows.append([
+            InlineKeyboardButton(text="◀", callback_data=f"photo:{photo_index - 1}"),
+            InlineKeyboardButton(text=f"Фото {photo_index + 1} / {photo_count}", callback_data="noop"),
+            InlineKeyboardButton(text="▶", callback_data=f"photo:{photo_index + 1}"),
+        ])
+    rows.append([InlineKeyboardButton(text="🔗 Відкрити на OLX", url=ad['link'])])
+    rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data=f"nav:{index}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def replace_button(markup, callback_data, new_button):
@@ -329,12 +344,35 @@ async def info_handler(callback: CallbackQuery):
 
     details = scrape_details(ad['link'])
     text = build_info_caption(ad, details["description"])
-
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔗 Відкрити на OLX", url=ad['link'])],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data=f"nav:{index}")],
-    ])
+    state["details"] = {
+        "index": index,
+        "photos": details["photos"],
+        "caption": text,
+        "message_id": callback.message.message_id,
+    }
+    keyboard = build_info_keyboard(ad, index, 0, len(details["photos"]))
     await callback.message.edit_caption(caption=text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("photo:"))
+async def photo_handler(callback: CallbackQuery):
+    photo_index = int(callback.data.split(":")[1])
+    state = user_results.get(callback.from_user.id)
+    details = state.get("details") if state else None
+    if details is None or details["message_id"] != callback.message.message_id:
+        await callback.answer("Пошук застарів, зроби новий")
+        return
+    photos = details["photos"]
+    if photo_index < 0 or photo_index >= len(photos):
+        await callback.answer("Це край списку")
+        return
+    ad = state["ads"][details["index"]]
+    keyboard = build_info_keyboard(ad, details["index"], photo_index, len(photos))
+    await callback.message.edit_media(
+        media=InputMediaPhoto(media=load_photo(photos[photo_index]), caption=details["caption"], parse_mode="HTML"),
+        reply_markup=keyboard
+    )
     await callback.answer()
 
 
