@@ -85,6 +85,13 @@ def format_price_range(min_price, max_price):
     return "будь-яка"
 
 
+def build_watch_message(query, min_price, max_price):
+    text = f"Стежу за «{query}»"
+    if min_price or max_price:
+        text += f", {format_price_range(min_price, max_price)}"
+    return f"{text} 🐾\nНапишу, коли з'явиться нове або подешевшає."
+
+
 def build_watch_card(watch):
     price_text = format_price_range(watch["min_price"], watch["max_price"])
     status = "Активна" if watch["is_active"] == 1 else "На паузі"
@@ -362,8 +369,7 @@ async def watch_button_handler(callback: CallbackQuery):
     await callback.message.edit_reply_markup(
         reply_markup=replace_button(callback.message.reply_markup, "watch", new_button)
     )
-    price_text = format_price_range(state["min_price"], state["max_price"])
-    await callback.message.answer(f"Стежу за «{state['query']}», {price_text}")
+    await callback.message.answer(build_watch_message(state["query"], state["min_price"], state["max_price"]))
     await callback.answer()
 
 
@@ -454,7 +460,7 @@ async def webapp_handler(message: Message):
     await run_search(message, query, min_price, max_price, sort, watching)
 
     if watching:
-        await message.answer(f"Стежу за «{query}», {format_price_range(min_price, max_price)}")
+        await message.answer(build_watch_message(query, min_price, max_price))
 
 
 @dp.message(F.text)
