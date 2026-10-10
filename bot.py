@@ -87,7 +87,7 @@ def build_main_keyboard():
         ],
         resize_keyboard=True,
         is_persistent=True,
-        input_field_placeholder="Що шукаємо? Напр. помада <500",
+        input_field_placeholder="Що шукаємо? Напр. помада",
     )
 
 
