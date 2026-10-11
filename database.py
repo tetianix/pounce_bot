@@ -65,13 +65,32 @@ def create_favorites_table():
     connection.commit()
     connection.close()
 
-def save_price(ad_id, ad_source, price):
+def add_missing_columns(cursor, table, columns):
+    cursor.execute(f"PRAGMA table_info({table})")
+    existing = {row[1] for row in cursor.fetchall()}
+    for name, definition in columns:
+        if name not in existing:
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+
+def migrate_price_currency():
+    connection = sqlite3.connect('database.db')
+    cursor = connection.cursor()
+    add_missing_columns(cursor, "ads", [
+        ("currency", "TEXT"),
+        ("price_converted", "INTEGER NOT NULL DEFAULT 0"),
+        ("price_label", "TEXT"),
+    ])
+    add_missing_columns(cursor, "price_history", [("currency", "TEXT")])
+    connection.commit()
+    connection.close()
+
+def save_price(ad_id, ad_source, price, currency):
     connection = sqlite3.connect('database.db')
     cursor = connection.cursor()
     cursor.execute("""
-    INSERT INTO price_history (ad_id, ad_source, price, changed_at)
-    VALUES (?, ?, ?, ?)
-    """, (ad_id, ad_source, price, datetime.now().isoformat()))
+    INSERT INTO price_history (ad_id, ad_source, price, currency, changed_at)
+    VALUES (?, ?, ?, ?, ?)
+    """, (ad_id, ad_source, price, currency, datetime.now().isoformat()))
     connection.commit()
     connection.close()
 
@@ -79,14 +98,20 @@ def save_ad(ad, query):
     connection = sqlite3.connect('database.db')
     cursor = connection.cursor()
     cursor.execute("""
-                   INSERT INTO ads (id, source, name, price, town, published_date, link, query, first_seen, photo) 
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   INSERT INTO ads (id, source, name, price, currency, price_converted, price_label,
+                                    town, published_date, link, query, first_seen, photo)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(source, id) DO UPDATE SET
                         price = excluded.price,
+                        currency = excluded.currency,
+                        price_converted = excluded.price_converted,
+                        price_label = excluded.price_label,
                         name = excluded.name,
                         photo = excluded.photo,
                         published_date = excluded.published_date
-                   """,(ad['id'], ad['source'], ad['name'], ad['price'], ad['town'], ad['published_date'], ad['link'], query, datetime.now().isoformat(),ad['photo']))
+                   """,(ad['id'], ad['source'], ad['name'], ad['price'], ad['currency'], int(ad['price_converted']),
+                        ad['price_label'], ad['town'], ad['published_date'], ad['link'], query,
+                        datetime.now().isoformat(), ad['photo']))
     connection.commit()
     connection.close()
 
@@ -124,7 +149,7 @@ def get_active_watches():
     connection.close()
     return result
 
-def get_last_price(ad_id, ad_source):
+def get_last_price(ad_id, ad_source, currency):
     connection = sqlite3.connect('database.db')
     cursor = connection.cursor()
     cursor.execute("""
@@ -132,21 +157,22 @@ def get_last_price(ad_id, ad_source):
     FROM price_history 
     WHERE ad_id = ? 
     AND ad_source = ?
-    ORDER BY id DESC LIMIT 1""",(ad_id, ad_source))
+    AND currency = ?
+    ORDER BY id DESC LIMIT 1""",(ad_id, ad_source, currency))
     result = cursor.fetchone()
     connection.close()
     if result is None:
         return None
     return result[0]
 
-def get_max_price(ad_id, ad_source):
+def get_max_price(ad_id, ad_source, currency):
     connection = sqlite3.connect('database.db')
     cursor = connection.cursor()
     cursor.execute("""
     SELECT MAX(price) 
     FROM price_history 
-    WHERE ad_id = ? AND ad_source = ?
-    """, (ad_id, ad_source))
+    WHERE ad_id = ? AND ad_source = ? AND currency = ?
+    """, (ad_id, ad_source, currency))
     result = cursor.fetchone()
     connection.close()
     return result[0]

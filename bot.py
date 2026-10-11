@@ -18,7 +18,7 @@ from core import search, search_recent, PERIODS
 from filters import filter_by_price
 from database import (save_ad, get_link, save_watch, get_active_watches, ad_exists, get_user_watches,
                       get_watch, delete_watch, toggle_watch, get_last_price, save_price, save_favorite, get_favorites,
-                      delete_favorite, get_max_price, is_favorite)
+                      delete_favorite, get_max_price, is_favorite, migrate_price_currency)
 from scrapers.olx import scrape_details, download_photo, SORTS
 import asyncio
 import html
@@ -121,7 +121,7 @@ def build_watch_card(watch):
 
 def format_price_text(ad):
     price_text = f"{ad['price']} грн" if ad['price'] is not None else "Ціна не вказана"
-    max_price = get_max_price(ad['id'], ad['source'])
+    max_price = get_max_price(ad['id'], ad['source'], ad['currency'])
     if ad['price'] is not None and max_price is not None and max_price > ad['price']:
         price_text += f"  📉 було {max_price}"
     return price_text
@@ -209,12 +209,12 @@ def replace_button(markup, callback_data, new_button):
 def track_price(ad):
     if ad["price"] is None:
         return None
-    last_price = get_last_price(ad["id"], ad["source"])
+    last_price = get_last_price(ad["id"], ad["source"], ad["currency"])
     if last_price is None:
-        save_price(ad["id"], ad["source"], ad["price"])
+        save_price(ad["id"], ad["source"], ad["price"], ad["currency"])
         return None
     if last_price != ad["price"]:
-        save_price(ad["id"], ad["source"], ad["price"])
+        save_price(ad["id"], ad["source"], ad["price"], ad["currency"])
         return last_price
     return None
 
@@ -561,6 +561,7 @@ async def text_handler(message: Message):
 
 
 async def main():
+    migrate_price_currency()
     scheduler = AsyncIOScheduler()
     scheduler.add_job(check_watches, "interval", minutes=CHECK_INTERVAL_MINUTES)
     scheduler.start()
