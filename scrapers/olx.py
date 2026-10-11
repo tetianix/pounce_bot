@@ -147,10 +147,11 @@ def scrape_details(link):
     try:
         response = requests.get(link, timeout=10, impersonate="chrome")
     except Exception:
-        return {"description": None, "photos": []}
+        return {"description": None, "photos": [], "price": None}
     if response.status_code == 200:
         soup = BeautifulSoup(response.content, 'html.parser')
         description = soup.select_one('[data-cy="ad_description"]')
+        price = soup.select_one('[data-testid="ad-price-container"]')
         photo = soup.select('[data-testid="ad-photo"] img')
         photos = []
         for img in photo:
@@ -160,8 +161,9 @@ def scrape_details(link):
         text = description.get_text("\n", strip=True) if description else None
         if text and text.startswith("Опис"):
             text = text[len("Опис"):].strip()
-        return {"description": text, "photos": photos}
-    return {"description": None, "photos": []}
+        price = clean_price(price.get_text(" ", strip=True)) if price else None
+        return {"description": text, "photos": photos, "price": price}
+    return {"description": None, "photos": [], "price": None}
 
 def download_photo(url):
     try:
