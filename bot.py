@@ -29,6 +29,8 @@ CHECK_INTERVAL_MINUTES = 15
 CAPTION_LIMIT = 1024
 MAX_STORED_RESULTS = 500
 STALE_TEXT = "Це старий пошук, зроби новий 🐾"
+CONVERTED_PRICE_THRESHOLD = 0.03
+CURRENCY_SIGNS = {"UAH": "грн", "USD": "$", "EUR": "€"}
 WEBAPP_URL = "https://tetianix.github.io/pounce_webapp/"
 
 load_dotenv()
@@ -119,11 +121,27 @@ def build_watch_card(watch):
     return text, keyboard
 
 
+def format_money(value, currency, converted=False):
+    text = f"{value:,}".replace(",", " ") + " " + CURRENCY_SIGNS.get(currency, "грн")
+    return "≈ " + text if converted else text
+
+
+def is_real_change(old_price, new_price, converted):
+    if not converted:
+        return old_price != new_price
+    return abs(new_price - old_price) > old_price * CONVERTED_PRICE_THRESHOLD
+
+
 def format_price_text(ad):
-    price_text = f"{ad['price']} грн" if ad['price'] is not None else "Ціна не вказана"
+    if ad['price'] is None:
+        return ad['price_label'] or "Ціна не вказана"
+    converted = bool(ad['price_converted'])
+    price_text = format_money(ad['price'], ad['currency'], converted)
+    if ad['price_label']:
+        price_text += f" · {ad['price_label']}"
     max_price = get_max_price(ad['id'], ad['source'], ad['currency'])
-    if ad['price'] is not None and max_price is not None and max_price > ad['price']:
-        price_text += f"  📉 було {max_price}"
+    if max_price is not None and max_price > ad['price'] and is_real_change(max_price, ad['price'], converted):
+        price_text += f"  📉 було {format_money(max_price, ad['currency'], converted)}"
     return price_text
 
 
@@ -213,7 +231,7 @@ def track_price(ad):
     if last_price is None:
         save_price(ad["id"], ad["source"], ad["price"], ad["currency"])
         return None
-    if last_price != ad["price"]:
+    if is_real_change(last_price, ad["price"], ad["price_converted"]):
         save_price(ad["id"], ad["source"], ad["price"], ad["currency"])
         return last_price
     return None
@@ -294,7 +312,8 @@ async def check_watches():
             old_price = track_price(ad)
             if old_price is not None:
                 prefix = "📉 Подешевшало" if ad["price"] < old_price else "📈 Подорожчало"
-                await send_ad_card(user_id, ad, f"{prefix} було {old_price} грн", query)
+                old_text = format_money(old_price, ad["currency"], ad["price_converted"])
+                await send_ad_card(user_id, ad, f"{prefix} було {old_text}", query)
             save_ad(ad, query)
 
 
