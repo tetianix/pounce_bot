@@ -18,7 +18,7 @@ from core import search
 from filters import filter_by_price
 from database import (save_ad, get_link, save_watch, get_active_watches, ad_exists, get_user_watches,
                       get_watch, delete_watch, toggle_watch, get_last_price, save_price, save_favorite, get_favorites,
-                      delete_favorite, get_max_price)
+                      delete_favorite, get_max_price, is_favorite)
 from scrapers.olx import scrape_details, download_photo, SORTS
 import asyncio
 import html
@@ -154,12 +154,19 @@ def build_info_caption(ad, description):
     return header + f"<blockquote expandable>{html.escape(description)}</blockquote>"
 
 
-def build_ad_card(ad, index, total, mode="search", watching=False):
+def build_fav_button(ad, is_fav):
+    if is_fav:
+        return InlineKeyboardButton(text="✅ В обраному", callback_data=f"unfav:{ad['source']}:{ad['id']}")
+    return InlineKeyboardButton(text="⭐ В обране", callback_data=f"fav:{ad['source']}:{ad['id']}")
+
+
+def build_ad_card(ad, index, total, mode="search", watching=False, user_id=None):
     text = format_ad_text(ad)
     if mode == "fav":
         action_button = InlineKeyboardButton(text="🗑 Прибрати", callback_data=f"favdel:{index}")
     else:
-        action_button = InlineKeyboardButton(text="⭐ В обране", callback_data=f"fav:{ad['source']}:{ad['id']}")
+        is_fav = user_id is not None and is_favorite(user_id, ad['id'], ad['source'])
+        action_button = build_fav_button(ad, is_fav)
     rows = [
         [
             InlineKeyboardButton(text="◀️", callback_data=f"nav:{index - 1}"),
@@ -222,7 +229,7 @@ async def send_ad_card(chat_id, ad, prefix="", query=None):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="Детальніше", callback_data=f"details:{ad['source']}:{ad['id']}"),
-            InlineKeyboardButton(text="⭐ В обране", callback_data=f"fav:{ad['source']}:{ad['id']}"),
+            build_fav_button(ad, is_favorite(chat_id, ad['id'], ad['source'])),
         ],
         [
             InlineKeyboardButton(text="🔗 Відкрити на OLX", url=ad['link']),
@@ -251,7 +258,8 @@ async def run_search(message, query, min_price=None, max_price=None, sort="new",
         for ad in ads:
             save_ad(ad, query)
             track_price(ad)
-        text, keyboard = build_ad_card(ads[0], 0, len(ads), watching=watching)
+        text, keyboard = build_ad_card(ads[0], 0, len(ads), watching=watching,
+                                       user_id=message.from_user.id)
         card = await message.answer_photo(photo=get_ad_photo(ads[0]), caption=text, reply_markup=keyboard,
                                           parse_mode="HTML")
         save_results(card, {
@@ -336,7 +344,8 @@ async def nav_handler(callback: CallbackQuery):
         await callback.answer("Це край списку")
         return
     ad = ads[index]
-    text, keyboard = build_ad_card(ad, index, len(ads), state["mode"], state.get("watching", False))
+    text, keyboard = build_ad_card(ad, index, len(ads), state["mode"], state.get("watching", False),
+                                   callback.from_user.id)
     await callback.message.edit_media(
         media=InputMediaPhoto(media=get_ad_photo(ad), caption=text, parse_mode="HTML"),
         reply_markup=keyboard
@@ -420,7 +429,7 @@ async def fav_handler(callback: CallbackQuery):
     source = parts[1]
     ad_id = parts[2]
     save_favorite(callback.from_user.id, ad_id, source)
-    new_button = InlineKeyboardButton(text="✅ В обраному", callback_data="noop")
+    new_button = build_fav_button({"source": source, "id": ad_id}, True)
     await callback.message.edit_reply_markup(
         reply_markup=replace_button(callback.message.reply_markup, callback.data, new_button)
     )
@@ -476,7 +485,10 @@ async def unfav_handler(callback: CallbackQuery):
     source = parts[1]
     ad_id = parts[2]
     delete_favorite(callback.from_user.id, ad_id, source)
-    await callback.message.delete()
+    new_button = build_fav_button({"source": source, "id": ad_id}, False)
+    await callback.message.edit_reply_markup(
+        reply_markup=replace_button(callback.message.reply_markup, callback.data, new_button)
+    )
     await callback.answer("Прибрано з обраного")
 
 

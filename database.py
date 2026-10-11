@@ -203,6 +203,18 @@ def get_favorites(user_id):
     connection.close()
     return result
 
+def is_favorite(user_id, ad_id, ad_source):
+    connection = sqlite3.connect('database.db')
+    cursor = connection.cursor()
+    cursor.execute("""
+                    SELECT 1
+                    FROM favorites
+                    WHERE user_id = ? AND ad_id = ? AND ad_source = ?
+                    """, (user_id, ad_id, ad_source))
+    result = cursor.fetchone()
+    connection.close()
+    return result is not None
+
 def get_watch(watch_id):
     connection = sqlite3.connect('database.db')
     connection.row_factory = sqlite3.Row
