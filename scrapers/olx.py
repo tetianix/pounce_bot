@@ -4,10 +4,6 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
-}
-
 SORTS = {
     "new": "created_at:desc",
     "cheap": "filter_float_price:asc",
@@ -134,7 +130,3 @@ def download_photo(url):
     if response.status_code == 200:
         return response.content
     return None
-
-if __name__ == "__main__":
-    for ad in scrape("помада", min_price=200, max_price=500, sort="cheap")[:5]:
-        print(ad["price"], ad["name"])
