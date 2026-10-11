@@ -16,6 +16,8 @@ MONTHS = ["січня", "лютого", "березня", "квітня", "тр�
           "липня", "серпня", "вересня", "жовтня", "листопада", "грудня"]
 
 DATE_RE = re.compile(r'^(.*?)(сьогодні|вчора) о (\d{1,2}):(\d{2})$', re.IGNORECASE)
+RELATIVE_RE = re.compile(r'(сьогодні|вчора) о (\d{1,2}):(\d{2})', re.IGNORECASE)
+FULL_DATE_RE = re.compile(r'(\d{1,2}) ([а-яіїєґʼ\']+) (\d{4})', re.IGNORECASE)
 
 def clean_price(price):
     cleaned = re.sub(r'\D', '', price)
@@ -52,6 +54,25 @@ def fix_date(text, now=None):
     if word[0].islower():
         result = result[0].lower() + result[1:]
     return prefix + result
+
+def parse_published_date(text, now=None):
+    if not text:
+        return None
+    if now is None:
+        now = datetime.now(timezone.utc)
+    today = now.astimezone(KYIV).date()
+    match = RELATIVE_RE.search(text)
+    if match:
+        word, hour, minute = match.groups()
+        day = today - timedelta(days=1) if word.lower() == "вчора" else today
+        return datetime(day.year, day.month, day.day, int(hour), int(minute), tzinfo=KYIV)
+    match = FULL_DATE_RE.search(text)
+    if match:
+        day, month, year = match.groups()
+        if month.lower() not in MONTHS:
+            return None
+        return datetime(int(year), MONTHS.index(month.lower()) + 1, int(day), 23, 59, 59, tzinfo=KYIV)
+    return None
 
 def scrape(query, page=1, min_price=None, max_price=None, sort="new"):
     url = f"https://www.olx.ua/uk/list/q-{query}/"
