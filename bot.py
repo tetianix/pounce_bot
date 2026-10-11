@@ -145,6 +145,15 @@ def format_price_text(ad):
     return price_text
 
 
+def format_details_price(ad, original):
+    if original is None or original["price"] is None or not ad['price_converted']:
+        return format_price_text(ad)
+    text = format_money(original["price"], original["currency"])
+    if ad['price_label']:
+        text += f" · {ad['price_label']}"
+    return text + f" ({format_money(ad['price'], ad['currency'], True)})"
+
+
 def format_ad_text(ad):
     name = html.escape(ad['name'])
     town = html.escape(ad['town'] or "")
@@ -156,10 +165,10 @@ def utf16_len(text):
     return len(text.encode("utf-16-le")) // 2
 
 
-def build_info_caption(ad, description):
+def build_info_caption(ad, description, original_price=None):
     name = ad['name']
     town = ad['town'] or ""
-    price_text = format_price_text(ad)
+    price_text = format_details_price(ad, original_price)
     header = f"<b>{html.escape(name)}</b>\n💰 {price_text}\n📍 {html.escape(town)}\n\n"
     if not description:
         return header + "Продавець не додав опис"
@@ -386,7 +395,7 @@ async def info_handler(callback: CallbackQuery):
     ad = state["ads"][index]
 
     details = scrape_details(ad['link'])
-    text = build_info_caption(ad, details["description"])
+    text = build_info_caption(ad, details["description"], details["price"])
     state["details"] = {
         "index": index,
         "photos": details["photos"],
@@ -441,6 +450,9 @@ async def details_handler(callback: CallbackQuery):
     elif len(media) == 1:
         await callback.message.answer_photo(details["photos"][0])
     description = details["description"] or "Опис відсутній"
+    original = details["price"]
+    if original and original["price"] is not None and original["currency"] != "UAH":
+        description = f"💰 {format_money(original['price'], original['currency'])}\n\n{description}"
     await callback.message.answer(description[:3000])
     await callback.answer()
 
