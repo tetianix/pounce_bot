@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from scrapers.olx import scrape as olx_scrape, parse_published_date
+from scrapers.olx import scrape as olx_scrape, parse_published_date, KYIV
 
 SOURCES = {
     "olx" : olx_scrape,
@@ -26,12 +26,12 @@ def sort_ads(ads, sort):
         return sorted(ads, key=lambda ad: (ad["price"] is None, ad["price"] or 0))
     if sort == "expensive":
         return sorted(ads, key=lambda ad: (ad["price"] is None, -(ad["price"] or 0)))
-    return sorted(ads, key=lambda ad: ad["published_at"], reverse=True)
+    return sorted(ads, key=lambda ad: ad["published_day"], reverse=True)
 
 def search_recent(query, period, min_price=None, max_price=None, sort="new", now=None):
     if now is None:
         now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(days=PERIODS[period])
+    first_day = now.astimezone(KYIV).date() - timedelta(days=PERIODS[period] - 1)
     results = []
     seen = set()
     for page in range(1, MAX_PERIOD_PAGES + 1):
@@ -42,8 +42,8 @@ def search_recent(query, period, min_price=None, max_price=None, sort="new", now
         reached_old = False
         for ad in new_ads:
             seen.add((ad["source"], ad["id"]))
-            ad["published_at"] = parse_published_date(ad["published_date"], now)
-            if ad["published_at"] is None or ad["published_at"] < cutoff:
+            ad["published_day"] = parse_published_date(ad["published_date"], now)
+            if ad["published_day"] is None or ad["published_day"] < first_day:
                 if not ad["promoted"]:
                     reached_old = True
                 continue

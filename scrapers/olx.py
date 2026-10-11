@@ -1,7 +1,7 @@
 from curl_cffi import requests
 import re
 from bs4 import BeautifulSoup
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 SORTS = {
@@ -63,15 +63,17 @@ def parse_published_date(text, now=None):
     today = now.astimezone(KYIV).date()
     match = RELATIVE_RE.search(text)
     if match:
-        word, hour, minute = match.groups()
-        day = today - timedelta(days=1) if word.lower() == "вчора" else today
-        return datetime(day.year, day.month, day.day, int(hour), int(minute), tzinfo=KYIV)
+        word = match.group(1)
+        return today - timedelta(days=1) if word.lower() == "вчора" else today
     match = FULL_DATE_RE.search(text)
     if match:
         day, month, year = match.groups()
         if month.lower() not in MONTHS:
             return None
-        return datetime(int(year), MONTHS.index(month.lower()) + 1, int(day), 23, 59, 59, tzinfo=KYIV)
+        try:
+            return date(int(year), MONTHS.index(month.lower()) + 1, int(day))
+        except ValueError:
+            return None
     return None
 
 def scrape(query, page=1, min_price=None, max_price=None, sort="new"):
