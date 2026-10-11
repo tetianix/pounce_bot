@@ -84,7 +84,8 @@ def save_ad(ad, query):
                     ON CONFLICT(source, id) DO UPDATE SET
                         price = excluded.price,
                         name = excluded.name,
-                        photo = excluded.photo
+                        photo = excluded.photo,
+                        published_date = excluded.published_date
                    """,(ad['id'], ad['source'], ad['name'], ad['price'], ad['town'], ad['published_date'], ad['link'], query, datetime.now().isoformat(),ad['photo']))
     connection.commit()
     connection.close()
