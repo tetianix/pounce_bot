@@ -19,11 +19,26 @@ DATE_RE = re.compile(r'^(.*?)(сьогодні|вчора) о (\d{1,2}):(\d{2})$
 RELATIVE_RE = re.compile(r'(сьогодні|вчора) о (\d{1,2}):(\d{2})', re.IGNORECASE)
 FULL_DATE_RE = re.compile(r'(\d{1,2}) ([а-яіїєґʼ\']+) (\d{4})', re.IGNORECASE)
 
-def clean_price(price):
-    cleaned = re.sub(r'\D', '', price)
-    if cleaned == "":
-        return None
-    return int(cleaned)
+PRICE_RE = re.compile(r'(\d+(?: \d{3})*)(?:[.,](\d{1,2}))?(?!\d)')
+
+PRICE_LABELS = [("договірна", "Договірна"), ("безкоштовно", "Безкоштовно"), ("обмін", "Обмін")]
+
+def clean_price(text):
+    text = re.sub(r'[\u00a0\u202f]', ' ', text or "").strip()
+    lowered = text.lower()
+    label = next((name for word, name in PRICE_LABELS if word in lowered), None)
+    if "$" in text or "usd" in lowered:
+        currency = "USD"
+    elif "€" in text or "eur" in lowered:
+        currency = "EUR"
+    else:
+        currency = "UAH"
+    match = PRICE_RE.search(text)
+    if match is None:
+        return {"price": None, "currency": currency, "converted": False, "label": label}
+    price = int(match.group(1).replace(" ", ""))
+    converted = match.group(2) is not None and currency == "UAH"
+    return {"price": price, "currency": currency, "converted": converted, "label": label}
 
 def clean_photo(url):
     if url is None:
@@ -113,7 +128,10 @@ def scrape(query, page=1, min_price=None, max_price=None, sort="new"):
             cleaned_price = clean_price(price.text)
             data = {"id": card_id,
                     "source": "olx",
-                    "price": cleaned_price,
+                    "price": cleaned_price["price"],
+                    "currency": cleaned_price["currency"],
+                    "price_converted": cleaned_price["converted"],
+                    "price_label": cleaned_price["label"],
                     "name" : name.text,
                     "town" : parts[0],
                     "published_date" : fix_date(parts[1]),
