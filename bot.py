@@ -14,7 +14,7 @@ from aiogram.types import (
     WebAppInfo,
 )
 from dotenv import load_dotenv
-from core import search
+from core import search, search_recent, PERIODS
 from filters import filter_by_price
 from database import (save_ad, get_link, save_watch, get_active_watches, ad_exists, get_user_watches,
                       get_watch, delete_watch, toggle_watch, get_last_price, save_price, save_favorite, get_favorites,
@@ -242,10 +242,13 @@ async def send_ad_card(chat_id, ad, prefix="", query=None):
         await bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard, parse_mode="HTML")
 
 
-async def run_search(message, query, min_price=None, max_price=None, sort="new", watching=False):
+async def run_search(message, query, min_price=None, max_price=None, sort="new", watching=False, period="any"):
     status = await message.answer("Шукаю...")
     try:
-        ads = search(query, min_price=min_price, max_price=max_price, sort=sort)
+        if period in PERIODS:
+            ads = search_recent(query, period, min_price=min_price, max_price=max_price, sort=sort)
+        else:
+            ads = search(query, min_price=min_price, max_price=max_price, sort=sort)
         if max_price is not None or min_price is not None:
             ads = filter_by_price(ads, max_price=max_price, min_price=min_price)
         ads.sort(key=lambda ad: ad["promoted"])
@@ -535,12 +538,15 @@ async def webapp_handler(message: Message):
     sort = data.get("sort")
     if not isinstance(sort, str) or sort not in SORTS:
         sort = "new"
+    period = data.get("period", "any")
+    if not isinstance(period, str) or period not in PERIODS:
+        period = "any"
 
     watching = data.get("watch") is True
     if watching:
         save_watch(message.from_user.id, query, max_price, min_price)
 
-    await run_search(message, query, min_price, max_price, sort, watching)
+    await run_search(message, query, min_price, max_price, sort, watching, period)
 
     if watching:
         await message.answer(build_watch_message(query, min_price, max_price))
