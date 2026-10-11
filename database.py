@@ -177,18 +177,6 @@ def get_link(ad_id, source):
         return None
     return result[0]
 
-def get_ads_by_query(query, limit, offset):
-    connection = sqlite3.connect('database.db')
-    connection.row_factory = sqlite3.Row
-    cursor = connection.cursor()
-    cursor.execute("""SELECT * 
-                      FROM ads 
-                      WHERE query = ? LIMIT ? OFFSET ?
-                   """, (query, limit, offset))
-    result = cursor.fetchall()
-    connection.close()
-    return result
-
 def get_favorites(user_id):
     connection = sqlite3.connect('database.db')
     connection.row_factory = sqlite3.Row
