@@ -1,6 +1,8 @@
 from curl_cffi import requests
 import re
 from bs4 import BeautifulSoup
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
@@ -11,6 +13,13 @@ SORTS = {
     "cheap": "filter_float_price:asc",
     "expensive": "filter_float_price:desc",
 }
+
+KYIV = ZoneInfo("Europe/Kyiv")
+
+MONTHS = ["січня", "лютого", "березня", "квітня", "травня", "червня",
+          "липня", "серпня", "вересня", "жовтня", "листопада", "грудня"]
+
+DATE_RE = re.compile(r'^(.*?)(сьогодні|вчора) о (\d{1,2}):(\d{2})$', re.IGNORECASE)
 
 def clean_price(price):
     cleaned = re.sub(r'\D', '', price)
@@ -23,6 +32,30 @@ def clean_photo(url):
         return None
     photo = re.sub(r';s=\d+x\d+;q=\d+', ";s=1000x1000;q=90", url)
     return photo
+
+def fix_date(text, now=None):
+    match = DATE_RE.match(text.strip())
+    if match is None:
+        return text
+    prefix, word, hour, minute = match.groups()
+    if now is None:
+        now = datetime.now(timezone.utc)
+    now_utc = now.astimezone(timezone.utc)
+    day = now_utc.date()
+    if word.lower() == "вчора":
+        day -= timedelta(days=1)
+    published = datetime(day.year, day.month, day.day, int(hour), int(minute), tzinfo=timezone.utc).astimezone(KYIV)
+    days_ago = (now.astimezone(KYIV).date() - published.date()).days
+    time_text = published.strftime("%H:%M")
+    if days_ago == 0:
+        result = f"Сьогодні о {time_text}"
+    elif days_ago == 1:
+        result = f"Вчора о {time_text}"
+    else:
+        return f"{prefix}{published.day:02d} {MONTHS[published.month - 1]} {published.year} р."
+    if word[0].islower():
+        result = result[0].lower() + result[1:]
+    return prefix + result
 
 def scrape(query, page=1, min_price=None, max_price=None, sort="new"):
     url = f"https://www.olx.ua/uk/list/q-{query}/"
@@ -64,7 +97,7 @@ def scrape(query, page=1, min_price=None, max_price=None, sort="new"):
                     "price": cleaned_price,
                     "name" : name.text,
                     "town" : parts[0],
-                    "published_date" : parts[1],
+                    "published_date" : fix_date(parts[1]),
                     "photo" : photo,
                     "promoted": "promoted" in link,
                     "link" : f"https://www.olx.ua{link}"}
