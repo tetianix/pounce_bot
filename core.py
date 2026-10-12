@@ -43,7 +43,9 @@ def search_recent(query, period, min_price=None, max_price=None, sort="new", now
         for ad in new_ads:
             seen.add((ad["source"], ad["id"]))
             ad["published_day"] = parse_published_date(ad["published_date"], now)
-            if ad["published_day"] is None or ad["published_day"] < first_day:
+            if ad["published_day"] is None:
+                continue
+            if ad["published_day"] < first_day:
                 if not ad["promoted"]:
                     reached_old = True
                 continue
