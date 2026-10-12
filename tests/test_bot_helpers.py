@@ -17,10 +17,16 @@ class FormatPriceRangeTest(unittest.TestCase):
         self.assertEqual(BOT["format_price_range"](300, 700), "300–700 грн")
 
     def test_only_min(self):
-        self.assertEqual(BOT["format_price_range"](1500, None), "від 1500 грн")
+        self.assertEqual(BOT["format_price_range"](1500, None), "від 1 500 грн")
+
+    def test_both_with_thousands(self):
+        self.assertEqual(BOT["format_price_range"](1500, 30000), "1 500–30 000 грн")
 
     def test_only_max(self):
         self.assertEqual(BOT["format_price_range"](None, 300), "до 300 грн")
+
+    def test_only_max_with_thousands(self):
+        self.assertEqual(BOT["format_price_range"](None, 12000), "до 12 000 грн")
 
     def test_none(self):
         self.assertEqual(BOT["format_price_range"](None, None), "будь-яка")

@@ -94,11 +94,11 @@ def build_main_keyboard():
 
 def format_price_range(min_price, max_price):
     if min_price and max_price:
-        return f"{min_price}–{max_price} грн"
+        return f"{format_number(min_price)}–{format_money(max_price, 'UAH')}"
     if min_price:
-        return f"від {min_price} грн"
+        return f"від {format_money(min_price, 'UAH')}"
     if max_price:
-        return f"до {max_price} грн"
+        return f"до {format_money(max_price, 'UAH')}"
     return "будь-яка"
 
 
@@ -121,8 +121,12 @@ def build_watch_card(watch):
     return text, keyboard
 
 
+def format_number(value):
+    return f"{value:,}".replace(",", " ")
+
+
 def format_money(value, currency, converted=False):
-    text = f"{value:,}".replace(",", " ") + " " + CURRENCY_SIGNS.get(currency, "грн")
+    text = format_number(value) + " " + CURRENCY_SIGNS.get(currency, "грн")
     return "≈ " + text if converted else text
 
 
