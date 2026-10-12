@@ -66,11 +66,17 @@ class SearchRecentTest(unittest.TestCase):
         self.assertEqual(len(calls), core.MAX_PERIOD_PAGES)
         self.assertEqual(len(ids), core.MAX_PERIOD_PAGES)
 
-    def test_unparsed_date_is_skipped(self):
+    def test_unparsed_date_is_skipped_without_stopping(self):
         pages = {1: [ad("a", "Сьогодні о 10:00"), ad("weird", "щось незрозуміле")], 2: [ad("b", "Сьогодні о 09:00")]}
         ids, calls = self.run_search(pages, "1d")
-        self.assertEqual(ids, ["a"])
-        self.assertEqual([call["page"] for call in calls], [1])
+        self.assertEqual(ids, ["a", "b"])
+        self.assertEqual([call["page"] for call in calls], [1, 2, 3])
+
+    def test_only_unparsed_dates_stop_at_max_pages(self):
+        pages = {n: [ad(f"w{n}", "щось незрозуміле")] for n in range(1, 10)}
+        ids, calls = self.run_search(pages, "7d")
+        self.assertEqual(ids, [])
+        self.assertEqual(len(calls), core.MAX_PERIOD_PAGES)
 
     def test_today_follows_kyiv_calendar_after_midnight(self):
         late = datetime(2026, 10, 11, 22, 30, tzinfo=timezone.utc)
