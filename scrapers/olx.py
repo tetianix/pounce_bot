@@ -42,6 +42,9 @@ STATES = {
 
 KYIV = ZoneInfo("Europe/Kyiv")
 
+class OlxError(Exception):
+    pass
+
 LISTING_ONLY = SoupStrainer(attrs={"data-testid": "listing-grid"})
 
 MONTHS = ["січня", "лютого", "березня", "квітня", "травня", "червня",
@@ -165,9 +168,10 @@ def scrape(query, page=1, min_price=None, max_price=None, sort="new", city=None,
         params["search[filter_enum_state][0]"] = state
     try:
         response = requests.get(url, params=params, timeout=10, impersonate="chrome")
+    except requests.exceptions.Timeout as e:
+        raise OlxError("таймаут") from e
     except Exception as e:
-        print("помилка запиту:", e)
-        return []
+        raise OlxError("мережа") from e
 
     if response.status_code == 200:
         soup = BeautifulSoup(response.content, 'html.parser', parse_only=LISTING_ONLY)
@@ -202,8 +206,7 @@ def scrape(query, page=1, min_price=None, max_price=None, sort="new", city=None,
                     "link" : f"https://www.olx.ua{link}"}
             results.append(data)
         return results
-    print("статус:", response.status_code)
-    return []
+    raise OlxError(f"HTTP {response.status_code}")
 
 def scrape_details(link):
     try:

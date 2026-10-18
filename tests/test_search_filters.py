@@ -82,6 +82,18 @@ class RunSearchFiltersTest(DatabaseTestCase):
         self.assertIn("прибрати частину фільтрів", message.answer.await_args_list[-1].args[0])
 
 
+class RunSearchOlxDownTest(DatabaseTestCase):
+    async def test_olx_error_is_not_reported_as_nothing_found(self):
+        search = MagicMock(side_effect=BOT["OlxError"]("таймаут"))
+        message = make_message()
+        with patch.dict(BOT, {"search": search}):
+            await BOT["run_search"](message, "iphone")
+        texts = [call.args[0] for call in message.answer.await_args_list]
+        self.assertEqual(texts[-1], BOT["OLX_DOWN_TEXT"])
+        self.assertFalse(any("Нічого не знайдено" in text for text in texts))
+        message.answer.return_value.delete.assert_awaited()
+
+
 class WatchButtonFiltersTest(DatabaseTestCase):
     async def test_watch_and_unwatch_use_filters_from_card(self):
         self.db.save_watch(1, "iphone", None, None)

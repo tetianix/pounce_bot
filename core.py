@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from scrapers.olx import scrape as olx_scrape, parse_published_date, KYIV
+from scrapers.olx import scrape as olx_scrape, parse_published_date, KYIV, OlxError
 
 SOURCES = {
     "olx" : olx_scrape,
@@ -35,7 +35,12 @@ def search_recent(query, period, min_price=None, max_price=None, sort="new", now
     results = []
     seen = set()
     for page in range(1, MAX_PERIOD_PAGES + 1):
-        found = search(query, page, min_price=min_price, max_price=max_price, sort="new", city=city, state=state)
+        try:
+            found = search(query, page, min_price=min_price, max_price=max_price, sort="new", city=city, state=state)
+        except OlxError:
+            if page == 1:
+                raise
+            break
         new_ads = [ad for ad in found if (ad["source"], ad["id"]) not in seen]
         if not new_ads:
             break

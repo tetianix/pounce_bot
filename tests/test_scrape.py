@@ -56,6 +56,22 @@ class ScrapeTest(unittest.TestCase):
         self.assertEqual(params["search[filter_enum_state][0]"], "used")
         self.assertEqual(params["search[filter_float_price:to]"], 5000)
 
+    def test_timeout_raises_olx_error(self):
+        get = MagicMock(side_effect=olx.requests.exceptions.Timeout("curl: (28) Operation timed out"))
+        with patch.object(olx.requests, "get", get), self.assertRaisesRegex(olx.OlxError, "таймаут"):
+            olx.scrape("iphone")
+
+    def test_network_failure_raises_olx_error(self):
+        get = MagicMock(side_effect=ConnectionError("reset"))
+        with patch.object(olx.requests, "get", get), self.assertRaisesRegex(olx.OlxError, "мережа"):
+            olx.scrape("iphone")
+
+    def test_bad_status_raises_olx_error(self):
+        get = fake_get("")
+        get.return_value.status_code = 429
+        with patch.object(olx.requests, "get", get), self.assertRaisesRegex(olx.OlxError, "HTTP 429"):
+            olx.scrape("iphone")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import core
 from core import search_recent
+from scrapers.olx import OlxError
 
 NOW = datetime(2026, 10, 11, 9, 0, tzinfo=timezone.utc)
 
@@ -20,6 +21,8 @@ class FakeSearch:
     def __call__(self, query, page, min_price=None, max_price=None, sort="new", city=None, state=None):
         self.calls.append({"page": page, "min_price": min_price, "max_price": max_price, "sort": sort,
                            "city": city, "state": state})
+        if self.pages.get(page) == "error":
+            raise OlxError("таймаут")
         return [dict(item) for item in self.pages.get(page, [])]
 
 
@@ -90,6 +93,16 @@ class SearchRecentTest(unittest.TestCase):
                                    min_price=100, max_price=500, sort="cheap")
         self.assertEqual(calls[0]["sort"], "new")
         self.assertEqual((calls[0]["min_price"], calls[0]["max_price"]), (100, 500))
+
+    def test_error_on_later_page_keeps_found_ads(self):
+        pages = {1: [ad("a", "Сьогодні о 10:00")], 2: "error", 3: [ad("c", "Сьогодні о 08:00")]}
+        ids, calls = self.run_search(pages, "1d")
+        self.assertEqual(ids, ["a"])
+        self.assertEqual([call["page"] for call in calls], [1, 2])
+
+    def test_error_on_first_page_is_raised(self):
+        with self.assertRaises(OlxError):
+            self.run_search({1: "error"}, "1d")
 
     def test_city_and_state_passed_to_every_page(self):
         pages = {1: [ad("a", "Сьогодні о 10:00")], 2: [ad("b", "Сьогодні о 09:00")]}

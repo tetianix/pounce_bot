@@ -21,7 +21,7 @@ from database import (save_ad, get_link, save_watch, get_active_watches, ad_exis
                       get_watch, delete_watch, toggle_watch, get_last_price, save_price, save_favorite, get_favorites,
                       delete_favorite, get_max_price, is_favorite, migrate_price_currency, delete_user_watch,
                       migrate_watch_filters)
-from scrapers.olx import scrape_details, download_photo, format_published_date, SORTS, CITIES, STATES
+from scrapers.olx import scrape_details, download_photo, format_published_date, SORTS, CITIES, STATES, OlxError
 import asyncio
 import html
 import json
@@ -34,6 +34,7 @@ MAX_STORED_RESULTS = 200
 MAX_RESULTS_PER_CHAT = 10
 RESULTS_TTL_SECONDS = 3600
 STALE_TEXT = "Це старий пошук, зроби новий 🐾"
+OLX_DOWN_TEXT = "OLX зараз не відповідає 😿\nСпробуй за хвилину"
 NO_WATCHES_TEXT = "Наразі пошуків немає"
 WATCHES_PER_PAGE = 5
 CONVERTED_PRICE_THRESHOLD = 0.03
@@ -352,11 +353,16 @@ async def run_search(message, query, min_price=None, max_price=None, sort="new",
                      city=None, state=None, exact=False):
     status = await message.answer("Шукаю...")
     try:
-        if period in PERIODS:
-            ads = search_recent(query, period, min_price=min_price, max_price=max_price, sort=sort,
-                                city=city, state=state)
-        else:
-            ads = search(query, min_price=min_price, max_price=max_price, sort=sort, city=city, state=state)
+        try:
+            if period in PERIODS:
+                ads = search_recent(query, period, min_price=min_price, max_price=max_price, sort=sort,
+                                    city=city, state=state)
+            else:
+                ads = search(query, min_price=min_price, max_price=max_price, sort=sort, city=city, state=state)
+        except OlxError as e:
+            print("пошук: OLX не відповів:", e)
+            await message.answer(OLX_DOWN_TEXT)
+            return
         if max_price is not None or min_price is not None:
             ads = filter_by_price(ads, max_price=max_price, min_price=min_price)
         if exact:
@@ -401,8 +407,12 @@ async def check_watches():
         min_price = watch["min_price"]
         max_price = None if max_price == 0 else max_price
         min_price = None if min_price == 0 else min_price
-        ads = search(query, min_price=min_price, max_price=max_price, city=watch["city"] or None,
-                     state=watch["state"] or None)
+        try:
+            ads = search(query, min_price=min_price, max_price=max_price, city=watch["city"] or None,
+                         state=watch["state"] or None)
+        except OlxError as e:
+            print("стеження: OLX не відповів:", e)
+            continue
         ads = filter_by_price(ads, max_price=max_price, min_price=min_price)
         if watch["exact"]:
             ads = filter_exact(ads, query)
