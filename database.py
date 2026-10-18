@@ -253,6 +253,18 @@ def delete_watch(watch_id):
     connection.commit()
     connection.close()
 
+def delete_user_watch(user_id, query, max_price, min_price):
+    connection = sqlite3.connect('database.db')
+    cursor = connection.cursor()
+    max_price = max_price if max_price is not None else 0
+    min_price = min_price if min_price is not None else 0
+    cursor.execute("""
+                    DELETE FROM watches
+                    WHERE user_id = ? AND query = ? AND max_price = ? AND min_price = ?
+                    """, (user_id, query, max_price, min_price))
+    connection.commit()
+    connection.close()
+
 def delete_favorite(user_id, ad_id, ad_source):
     connection = sqlite3.connect('database.db')
     cursor = connection.cursor()

@@ -19,7 +19,7 @@ from core import search, search_recent, PERIODS
 from filters import filter_by_price
 from database import (save_ad, get_link, save_watch, get_active_watches, ad_exists, get_user_watches,
                       get_watch, delete_watch, toggle_watch, get_last_price, save_price, save_favorite, get_favorites,
-                      delete_favorite, get_max_price, is_favorite, migrate_price_currency)
+                      delete_favorite, get_max_price, is_favorite, migrate_price_currency, delete_user_watch)
 from scrapers.olx import scrape_details, download_photo, format_published_date, SORTS
 import asyncio
 import html
@@ -220,7 +220,7 @@ def build_ad_card(ad, index, total, mode="search", watching=False, user_id=None)
     ]
     if mode == "search":
         if watching:
-            rows.append([InlineKeyboardButton(text="✅ Стежу", callback_data="noop")])
+            rows.append([InlineKeyboardButton(text="✅ Стежу", callback_data="unwatch")])
         else:
             rows.append([InlineKeyboardButton(text="🔔 Стежити", callback_data="watch")])
     rows.append([InlineKeyboardButton(text="🔗 Відкрити на OLX", url=ad['link'])])
@@ -494,11 +494,27 @@ async def watch_button_handler(callback: CallbackQuery):
         return
     save_watch(callback.from_user.id, state["query"], state["max_price"], state["min_price"])
     state["watching"] = True
-    new_button = InlineKeyboardButton(text="✅ Стежу", callback_data="noop")
+    new_button = InlineKeyboardButton(text="✅ Стежу", callback_data="unwatch")
     await callback.message.edit_reply_markup(
         reply_markup=replace_button(callback.message.reply_markup, "watch", new_button)
     )
     await callback.message.answer(build_watch_message(state["query"], state["min_price"], state["max_price"]))
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "unwatch")
+async def unwatch_button_handler(callback: CallbackQuery):
+    state = get_results(callback)
+    if state is None or state["mode"] != "search":
+        await callback.answer(STALE_TEXT)
+        return
+    delete_user_watch(callback.from_user.id, state["query"], state["max_price"], state["min_price"])
+    state["watching"] = False
+    new_button = InlineKeyboardButton(text="🔔 Стежити", callback_data="watch")
+    await callback.message.edit_reply_markup(
+        reply_markup=replace_button(callback.message.reply_markup, "unwatch", new_button)
+    )
+    await callback.message.answer(f"Більше не стежу за «{state['query']}»")
     await callback.answer()
 
 
