@@ -137,13 +137,21 @@ def is_real_change(old_price, new_price, converted):
     return abs(new_price - old_price) > old_price * CONVERTED_PRICE_THRESHOLD
 
 
-def format_price_text(ad):
+def format_price_change(old_price, new_price, currency, converted=False):
+    prefix = "📉 Подешевшало" if new_price < old_price else "📈 Подорожчало"
+    text = f"{format_number(old_price)} → {format_money(new_price, currency)}"
+    return f"{prefix}: " + ("≈ " + text if converted else text)
+
+
+def format_price_text(ad, show_max=True):
     if ad['price'] is None:
         return ad['price_label'] or "Ціна не вказана"
     converted = bool(ad['price_converted'])
     price_text = format_money(ad['price'], ad['currency'], converted)
     if ad['price_label']:
         price_text += f" · {ad['price_label']}"
+    if not show_max:
+        return price_text
     max_price = get_max_price(ad['id'], ad['source'], ad['currency'])
     if max_price is not None and max_price > ad['price'] and is_real_change(max_price, ad['price'], converted):
         price_text += f"  📉 було {format_money(max_price, ad['currency'], converted)}"
@@ -159,11 +167,11 @@ def format_details_price(ad, original):
     return text + f" ({format_money(ad['price'], ad['currency'], True)})"
 
 
-def format_ad_text(ad):
+def format_ad_text(ad, show_max=True):
     name = html.escape(ad['name'])
     town = html.escape(ad['town'] or "")
     date = html.escape(ad['published_date'] or "")
-    return f"<b>{name}</b>\n💰 {format_price_text(ad)}\n📍 {town}\n🕒 <i>{date}</i>"
+    return f"<b>{name}</b>\n💰 {format_price_text(ad, show_max)}\n📍 {town}\n🕒 <i>{date}</i>"
 
 
 def utf16_len(text):
@@ -256,7 +264,7 @@ async def send_ad_card(chat_id, ad, prefix="", query=None):
         lines.append(f"<b>{prefix}</b>")
     if query:
         lines.append(f"🔍 за пошуком «{html.escape(query)}»")
-    lines.append(format_ad_text(ad))
+    lines.append(format_ad_text(ad, show_max=False))
     text = "\n".join(lines)
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -328,9 +336,8 @@ async def check_watches():
                 if is_new:
                     await send_ad_card(user_id, ad, "🆕 Нове оголошення", query)
                 if old_price is not None:
-                    prefix = "📉 Подешевшало" if ad["price"] < old_price else "📈 Подорожчало"
-                    old_text = format_money(old_price, ad["currency"], ad["price_converted"])
-                    await send_ad_card(user_id, ad, f"{prefix} було {old_text}", query)
+                    title = format_price_change(old_price, ad["price"], ad["currency"], ad["price_converted"])
+                    await send_ad_card(user_id, ad, title, query)
             except Exception as e:
                 print("помилка сповіщення:", e)
 

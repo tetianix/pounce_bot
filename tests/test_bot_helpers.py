@@ -72,5 +72,20 @@ class IsRealChangeTest(unittest.TestCase):
         self.assertTrue(BOT["is_real_change"](10000, 9000, True))
 
 
+class FormatPriceChangeTest(unittest.TestCase):
+    def test_cheaper(self):
+        self.assertEqual(BOT["format_price_change"](2200, 2000, "UAH"), "📉 Подешевшало: 2 200 → 2 000 грн")
+
+    def test_more_expensive(self):
+        self.assertEqual(BOT["format_price_change"](2000, 2500, "UAH"), "📈 Подорожчало: 2 000 → 2 500 грн")
+
+    def test_usd(self):
+        self.assertEqual(BOT["format_price_change"](500, 450, "USD"), "📉 Подешевшало: 500 → 450 $")
+
+    def test_converted(self):
+        self.assertEqual(BOT["format_price_change"](22458, 20000, "UAH", True),
+                         "📉 Подешевшало: ≈ 22 458 → 20 000 грн")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -88,6 +88,23 @@ class CheckWatchesTest(unittest.IsolatedAsyncioTestCase):
         await BOT["check_watches"]()
         self.assertEqual(self.fake_bot.send_photo.await_count, 2)
 
+    async def test_price_drop_title_and_no_max_line(self):
+        for price in (2500, 2200, 2000):
+            self.ads = [make_ad(price)]
+            await BOT["check_watches"]()
+        caption = self.fake_bot.send_photo.await_args.kwargs["caption"]
+        self.assertIn("📉 Подешевшало: 2 200 → 2 000 грн", caption)
+        self.assertIn("💰 2 000 грн\n", caption)
+        self.assertNotIn("було", caption)
+
+    async def test_new_ad_has_no_max_line(self):
+        import database
+        database.save_price("909426485", "olx", 2500, "UAH")
+        await BOT["check_watches"]()
+        caption = self.fake_bot.send_photo.await_args_list[0].kwargs["caption"]
+        self.assertIn("🆕 Нове оголошення", caption)
+        self.assertNotIn("було", caption)
+
 
 if __name__ == "__main__":
     unittest.main()
