@@ -1,5 +1,6 @@
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
+from aiogram.exceptions import TelegramBadRequest
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiogram.types import (
     Message,
@@ -269,7 +270,7 @@ async def send_ad_card(chat_id, ad, prefix="", query=None):
     try:
         await bot.send_photo(chat_id=chat_id, photo=get_ad_photo(ad), caption=text,
                              reply_markup=keyboard, parse_mode="HTML")
-    except Exception:
+    except TelegramBadRequest:
         await bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard, parse_mode="HTML")
 
 
@@ -320,14 +321,18 @@ async def check_watches():
         ads = search(query, min_price=min_price, max_price=max_price)
         ads = filter_by_price(ads, max_price=max_price, min_price=min_price)
         for ad in ads:
-            if not ad_exists(ad["id"], ad["source"]):
-                await send_ad_card(user_id, ad, "🆕 Нове оголошення", query)
+            is_new = not ad_exists(ad["id"], ad["source"])
             old_price = track_price(ad)
-            if old_price is not None:
-                prefix = "📉 Подешевшало" if ad["price"] < old_price else "📈 Подорожчало"
-                old_text = format_money(old_price, ad["currency"], ad["price_converted"])
-                await send_ad_card(user_id, ad, f"{prefix} було {old_text}", query)
             save_ad(ad, query)
+            try:
+                if is_new:
+                    await send_ad_card(user_id, ad, "🆕 Нове оголошення", query)
+                if old_price is not None:
+                    prefix = "📉 Подешевшало" if ad["price"] < old_price else "📈 Подорожчало"
+                    old_text = format_money(old_price, ad["currency"], ad["price_converted"])
+                    await send_ad_card(user_id, ad, f"{prefix} було {old_text}", query)
+            except Exception as e:
+                print("помилка сповіщення:", e)
 
 
 @dp.message(Command("start"))
