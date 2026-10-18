@@ -16,19 +16,24 @@ from aiogram.types import (
 )
 from dotenv import load_dotenv
 from core import search, search_recent, PERIODS
-from filters import filter_by_price, filter_exact
+from filters import filter_by_price, filter_exact, has_all_words
 from database import (save_ad, get_link, save_watch, get_active_watches, ad_exists, get_user_watches,
                       get_watch, delete_watch, toggle_watch, get_last_price, save_price, save_favorite, get_favorites,
                       delete_favorite, get_max_price, is_favorite, migrate_price_currency, delete_user_watch,
                       migrate_watch_filters)
 from scrapers.olx import scrape_details, download_photo, format_published_date, SORTS, CITIES, STATES, OlxError
+from collections import Counter
 import asyncio
 import html
 import json
 import os
+import random
 from time import monotonic
 
 CHECK_INTERVAL_MINUTES = 15
+WATCH_PAUSE_SECONDS = (1, 2)
+WATCH_RETRY_DELAYS = (2, 4)
+MAX_FAILED_GROUPS_IN_ROW = 3
 CAPTION_LIMIT = 1024
 MAX_STORED_RESULTS = 200
 MAX_RESULTS_PER_CHAT = 10
@@ -398,36 +403,106 @@ async def run_search(message, query, min_price=None, max_price=None, sort="new",
         await status.delete()
 
 
-async def check_watches():
-    watches = get_active_watches()
+async def wait(seconds):
+    await asyncio.sleep(seconds)
+
+
+def group_watches(watches):
+    groups = {}
     for watch in watches:
-        user_id = watch["user_id"]
-        query = watch["query"]
-        max_price = watch["max_price"]
-        min_price = watch["min_price"]
-        max_price = None if max_price == 0 else max_price
-        min_price = None if min_price == 0 else min_price
+        key = (watch["query"], watch["min_price"] or None, watch["max_price"] or None,
+               watch["city"] or None, watch["state"] or None)
+        groups.setdefault(key, []).append(watch)
+    return groups
+
+
+async def search_for_watches(key, stats):
+    query, min_price, max_price, city, state = key
+    for delay in WATCH_RETRY_DELAYS + (None,):
         try:
-            ads = search(query, min_price=min_price, max_price=max_price, city=watch["city"] or None,
-                         state=watch["state"] or None)
-        except OlxError as e:
-            print("стеження: OLX не відповів:", e)
+            return await asyncio.to_thread(search, query, min_price=min_price, max_price=max_price,
+                                           city=city, state=state)
+        except OlxError:
+            if delay is None:
+                raise
+            stats["retries"] += 1
+            await wait(delay + random.uniform(0, 1))
+
+
+def watch_users(group, ad, query):
+    users = []
+    for watch in group:
+        if watch["exact"] and not has_all_words(ad["name"], query):
             continue
-        ads = filter_by_price(ads, max_price=max_price, min_price=min_price)
-        if watch["exact"]:
-            ads = filter_exact(ads, query)
-        for ad in ads:
-            is_new = not ad_exists(ad["id"], ad["source"])
-            old_price = track_price(ad)
-            save_ad(ad, query)
+        if watch["user_id"] not in users:
+            users.append(watch["user_id"])
+    return users
+
+
+async def notify_watchers(group, query, ads, stats):
+    for ad in ads:
+        is_new = not ad_exists(ad["id"], ad["source"])
+        old_price = track_price(ad)
+        save_ad(ad, query)
+        if not is_new and old_price is None:
+            continue
+        for user_id in watch_users(group, ad, query):
             try:
                 if is_new:
                     await send_ad_card(user_id, ad, "🆕 Нове оголошення", query)
+                    stats["sent"] += 1
                 if old_price is not None:
                     title = format_price_change(old_price, ad["price"], ad["currency"], ad["price_converted"])
                     await send_ad_card(user_id, ad, title, query)
+                    stats["sent"] += 1
             except Exception as e:
-                print("помилка сповіщення:", e)
+                stats["send_errors"] += 1
+                stats["last_send_error"] = f"{type(e).__name__}: {e}"
+
+
+def format_check_summary(watch_count, stats, errors, seconds):
+    parts = [f"стежень — {watch_count}", f"запитів до OLX — {stats['requests']}", f"повторів — {stats['retries']}"]
+    if errors:
+        details = ", ".join(f"{error} ×{count}" for error, count in errors.items())
+        parts.append(f"не вдалося — {sum(errors.values())} ({details})")
+    if stats["skipped"]:
+        parts.append(f"пропущено — {stats['skipped']}, бо OLX не відповідає")
+    parts.append(f"сповіщень — {stats['sent']}")
+    send_errors = f"помилок надсилання — {stats['send_errors']}"
+    if stats["send_errors"]:
+        send_errors += f" (остання: {stats['last_send_error']})"
+    parts.append(send_errors)
+    parts.append(f"{seconds:.0f} с")
+    return "перевірка стежень: " + ", ".join(parts)
+
+
+async def check_watches():
+    started = monotonic()
+    watches = get_active_watches()
+    if not watches:
+        return
+    groups = group_watches(watches)
+    stats = Counter()
+    errors = Counter()
+    failed_in_row = 0
+    for number, (key, group) in enumerate(groups.items()):
+        if number:
+            await wait(random.uniform(*WATCH_PAUSE_SECONDS))
+        stats["requests"] += 1
+        try:
+            ads = await search_for_watches(key, stats)
+        except OlxError as e:
+            errors[str(e)] += 1
+            failed_in_row += 1
+            if failed_in_row >= MAX_FAILED_GROUPS_IN_ROW:
+                stats["skipped"] = len(groups) - number - 1
+                break
+            continue
+        failed_in_row = 0
+        query, min_price, max_price, _, _ = key
+        ads = filter_by_price(ads, max_price=max_price, min_price=min_price)
+        await notify_watchers(group, query, ads, stats)
+    print(format_check_summary(len(watches), stats, errors, monotonic() - started))
 
 
 @dp.message(Command("start"))

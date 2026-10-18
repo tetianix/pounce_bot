@@ -15,6 +15,9 @@ def split_words(text):
     return set(WORD_RE.findall(text.lower()))
 
 
+def has_all_words(name, query):
+    return split_words(query) <= split_words(name)
+
+
 def filter_exact(ads, query):
-    words = split_words(query)
-    return [ad for ad in ads if words <= split_words(ad['name'])]
+    return [ad for ad in ads if has_all_words(ad['name'], query)]

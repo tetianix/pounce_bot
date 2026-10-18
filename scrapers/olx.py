@@ -1,5 +1,7 @@
 from curl_cffi import requests
+import functools
 import re
+import threading
 from bs4 import BeautifulSoup, SoupStrainer
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -44,6 +46,15 @@ KYIV = ZoneInfo("Europe/Kyiv")
 
 class OlxError(Exception):
     pass
+
+OLX_LOCK = threading.Lock()
+
+def one_request_at_a_time(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        with OLX_LOCK:
+            return func(*args, **kwargs)
+    return wrapper
 
 LISTING_ONLY = SoupStrainer(attrs={"data-testid": "listing-grid"})
 
@@ -152,6 +163,7 @@ def format_published_date(text, now=None):
         label = label[0].lower() + label[1:]
     return prefix + label + YEAR_SUFFIX_RE.sub("", text[match.end():])
 
+@one_request_at_a_time
 def scrape(query, page=1, min_price=None, max_price=None, sort="new", city=None, state=None):
     location = CITIES[city]["slug"] if city else "list"
     url = f"https://www.olx.ua/uk/{location}/q-{query}/"
@@ -208,6 +220,7 @@ def scrape(query, page=1, min_price=None, max_price=None, sort="new", city=None,
         return results
     raise OlxError(f"HTTP {response.status_code}")
 
+@one_request_at_a_time
 def scrape_details(link):
     try:
         response = requests.get(link, timeout=10, impersonate="chrome")

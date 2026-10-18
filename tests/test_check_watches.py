@@ -1,5 +1,7 @@
+import io
 import os
 import tempfile
+from contextlib import redirect_stdout
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -24,7 +26,7 @@ def make_ad(price=2200):
             "link": "https://www.olx.ua/d/obyavlenie/sumka-bagllet-ID110gp8.html"}
 
 
-class CheckWatchesTest(unittest.IsolatedAsyncioTestCase):
+class WatchesTestCase(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.old_cwd = os.getcwd()
@@ -52,6 +54,8 @@ class CheckWatchesTest(unittest.IsolatedAsyncioTestCase):
         os.chdir(self.old_cwd)
         self.tmp.cleanup()
 
+
+class CheckWatchesTest(WatchesTestCase):
     def sent_count(self):
         return self.fake_bot.send_photo.await_count + self.fake_bot.send_message.await_count
 
@@ -104,6 +108,110 @@ class CheckWatchesTest(unittest.IsolatedAsyncioTestCase):
         caption = self.fake_bot.send_photo.await_args_list[0].kwargs["caption"]
         self.assertIn("🆕 Нове оголошення", caption)
         self.assertNotIn("було", caption)
+
+
+def named_ad(ad_id, name):
+    ad = make_ad()
+    ad["id"] = ad_id
+    ad["name"] = name
+    return ad
+
+
+class GroupedWatchesTest(WatchesTestCase):
+    def setUp(self):
+        super().setUp()
+        import database
+        self.db = database
+        self.search = MagicMock(side_effect=lambda *args, **kwargs: [dict(ad) for ad in self.ads])
+        self.wait = AsyncMock()
+        self.send = AsyncMock()
+        self.extra = patch.dict(BOT, {"search": self.search, "wait": self.wait, "send_ad_card": self.send})
+        self.extra.start()
+
+    def tearDown(self):
+        self.extra.stop()
+        super().tearDown()
+
+    async def check(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            await BOT["check_watches"]()
+        return out.getvalue()
+
+    def notified(self):
+        return sorted((call.args[0], call.args[1]["id"]) for call in self.send.await_args_list)
+
+    async def test_same_watch_of_two_users_is_one_request_and_both_notified(self):
+        self.db.save_watch(2, "bagllet сумка", 0, 0)
+        await self.check()
+        self.assertEqual(self.search.call_count, 1)
+        self.assertEqual(self.notified(), [(1, "909426485"), (2, "909426485")])
+
+    async def test_two_users_both_get_price_drop(self):
+        self.db.save_watch(2, "bagllet сумка", 0, 0)
+        await self.check()
+        self.ads = [make_ad(1900)]
+        self.send.reset_mock()
+        await self.check()
+        titles = [call.args[2] for call in self.send.await_args_list]
+        self.assertEqual(len(titles), 2)
+        self.assertTrue(all("Подешевшало" in title for title in titles))
+
+    async def test_exact_and_plain_watch_share_request_but_exact_filters(self):
+        self.db.save_watch(2, "bagllet сумка", 0, 0, exact=True)
+        self.db.save_watch(1, "bagllet сумка", 0, 0, exact=True)
+        self.ads = [named_ad("a", "Сумка Bagllet шкіряна"), named_ad("b", "Сумочка Bagllet")]
+        await self.check()
+        self.assertEqual(self.search.call_count, 1)
+        self.assertEqual(self.notified(), [(1, "a"), (1, "b"), (2, "a")])
+
+    async def test_pause_between_requests_but_not_before_first(self):
+        self.db.save_watch(1, "лампа", 0, 0)
+        self.db.save_watch(1, "лампа", 500, 0, city="lviv")
+        await self.check()
+        self.assertEqual(self.search.call_count, 3)
+        pauses = [call.args[0] for call in self.wait.await_args_list]
+        self.assertEqual(len(pauses), 2)
+        self.assertTrue(all(1 <= pause <= 2 for pause in pauses))
+        self.assertEqual(self.search.call_args.kwargs["city"], "lviv")
+
+    async def test_timeout_is_retried_with_growing_delay(self):
+        results = [BOT["OlxError"]("таймаут"), BOT["OlxError"]("таймаут"), [make_ad()]]
+        self.search.side_effect = lambda *args, **kwargs: (
+            (_ for _ in ()).throw(results.pop(0)) if isinstance(results[0], Exception) else results.pop(0))
+        log = await self.check()
+        self.assertEqual(self.search.call_count, 3)
+        delays = [call.args[0] for call in self.wait.await_args_list]
+        self.assertTrue(2 <= delays[0] < 3 and 4 <= delays[1] < 5)
+        self.assertEqual(self.notified(), [(1, "909426485")])
+        self.assertIn("повторів — 2", log)
+
+    async def test_stops_after_failed_groups_in_row_with_one_summary_line(self):
+        for query in ("a", "b", "c", "d", "e"):
+            self.db.save_watch(1, query, 0, 0)
+        self.search.side_effect = BOT["OlxError"]("таймаут")
+        log = await self.check()
+        attempts = len(BOT["WATCH_RETRY_DELAYS"]) + 1
+        self.assertEqual(self.search.call_count, BOT["MAX_FAILED_GROUPS_IN_ROW"] * attempts)
+        self.assertEqual(log.count("\n"), 1)
+        self.assertIn("не вдалося — 3 (таймаут ×3)", log)
+        self.assertIn("пропущено — 3", log)
+
+    async def test_one_failed_group_does_not_block_others(self):
+        self.db.save_watch(2, "лампа", 0, 0)
+        def fake(query, **kwargs):
+            if query == "bagllet сумка":
+                raise BOT["OlxError"]("HTTP 429")
+            return [named_ad("lamp", "Лампа")]
+        self.search.side_effect = fake
+        log = await self.check()
+        self.assertEqual(self.notified(), [(2, "lamp")])
+        self.assertIn("не вдалося — 1 (HTTP 429 ×1)", log)
+
+    async def test_no_active_watches_logs_nothing(self):
+        self.db.toggle_watch(1)
+        self.assertEqual(await self.check(), "")
+        self.search.assert_not_called()
 
 
 if __name__ == "__main__":
