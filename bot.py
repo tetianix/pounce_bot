@@ -19,7 +19,8 @@ from core import search, search_recent, PERIODS
 from filters import filter_by_price
 from database import (save_ad, get_link, save_watch, get_active_watches, ad_exists, get_user_watches,
                       get_watch, delete_watch, toggle_watch, get_last_price, save_price, save_favorite, get_favorites,
-                      delete_favorite, get_max_price, is_favorite, migrate_price_currency, delete_user_watch)
+                      delete_favorite, get_max_price, is_favorite, migrate_price_currency, delete_user_watch,
+                      migrate_watch_filters)
 from scrapers.olx import scrape_details, download_photo, format_published_date, SORTS
 import asyncio
 import html
@@ -668,6 +669,7 @@ async def text_handler(message: Message):
 
 async def main():
     migrate_price_currency()
+    migrate_watch_filters()
     scheduler = AsyncIOScheduler()
     scheduler.add_job(check_watches, "interval", minutes=CHECK_INTERVAL_MINUTES)
     scheduler.start()

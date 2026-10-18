@@ -20,19 +20,23 @@ def create_table():
     connection.commit()
     connection.close()
 
+WATCHES_COLUMNS = '''
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    query TEXT,
+    max_price INTEGER,
+    min_price INTEGER,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT,
+    city TEXT NOT NULL DEFAULT '',
+    state TEXT NOT NULL DEFAULT '',
+    exact INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(user_id, query, max_price, min_price, city, state, exact)'''
+
 def create_watches_table():
     connection = sqlite3.connect('database.db')
     cursor = connection.cursor()
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS watches(
-    id INTEGER PRIMARY KEY AUTOINCREMENT, 
-    user_id INTEGER NOT NULL,
-    query TEXT, 
-    max_price INTEGER, 
-    min_price INTEGER, 
-    is_active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT,
-    UNIQUE(user_id, query, max_price, min_price))''')
+    cursor.execute(f"CREATE TABLE IF NOT EXISTS watches({WATCHES_COLUMNS})")
     connection.commit()
     connection.close()
 
@@ -84,6 +88,32 @@ def migrate_price_currency():
     connection.commit()
     connection.close()
 
+def migrate_watch_filters():
+    connection = sqlite3.connect('database.db')
+    cursor = connection.cursor()
+    cursor.execute("PRAGMA table_info(watches)")
+    if "city" in {row[1] for row in cursor.fetchall()}:
+        connection.close()
+        return
+    try:
+        cursor.executescript(f"""
+            BEGIN;
+            CREATE TABLE watches_new({WATCHES_COLUMNS});
+            INSERT INTO watches_new (id, user_id, query, max_price, min_price, is_active, created_at)
+                SELECT id, user_id, query, max_price, min_price, is_active, created_at FROM watches;
+            DELETE FROM sqlite_sequence WHERE name = 'watches_new';
+            INSERT INTO sqlite_sequence (name, seq) SELECT 'watches_new', seq FROM sqlite_sequence WHERE name = 'watches';
+            DROP TABLE watches;
+            ALTER TABLE watches_new RENAME TO watches;
+            COMMIT;
+        """)
+    except sqlite3.Error:
+        if connection.in_transaction:
+            connection.rollback()
+        raise
+    finally:
+        connection.close()
+
 def save_price(ad_id, ad_source, price, currency):
     connection = sqlite3.connect('database.db')
     cursor = connection.cursor()
@@ -115,15 +145,19 @@ def save_ad(ad, query):
     connection.commit()
     connection.close()
 
-def save_watch(user_id, query, max_price, min_price):
+def watch_key(max_price, min_price, city, state, exact):
+    return (max_price if max_price is not None else 0, min_price if min_price is not None else 0,
+            city or "", state or "", int(bool(exact)))
+
+def save_watch(user_id, query, max_price, min_price, city=None, state=None, exact=False):
     connection = sqlite3.connect('database.db')
     cursor = connection.cursor()
-    max_price = max_price if max_price is not None else 0
-    min_price = min_price if min_price is not None else 0
     cursor.execute("""
-                    INSERT OR IGNORE INTO watches (user_id, query, max_price, min_price, created_at) 
-                    VALUES (?, ?, ?, ?, ?)
-                    """, (user_id, query, max_price, min_price, datetime.now().isoformat()))
+                    INSERT OR IGNORE INTO watches (user_id, query, max_price, min_price, city, state, exact,
+                                                   created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (user_id, query, *watch_key(max_price, min_price, city, state, exact),
+                          datetime.now().isoformat()))
     connection.commit()
     connection.close()
 
@@ -254,15 +288,14 @@ def delete_watch(watch_id):
     connection.commit()
     connection.close()
 
-def delete_user_watch(user_id, query, max_price, min_price):
+def delete_user_watch(user_id, query, max_price, min_price, city=None, state=None, exact=False):
     connection = sqlite3.connect('database.db')
     cursor = connection.cursor()
-    max_price = max_price if max_price is not None else 0
-    min_price = min_price if min_price is not None else 0
     cursor.execute("""
                     DELETE FROM watches
                     WHERE user_id = ? AND query = ? AND max_price = ? AND min_price = ?
-                    """, (user_id, query, max_price, min_price))
+                      AND city = ? AND state = ? AND exact = ?
+                    """, (user_id, query, *watch_key(max_price, min_price, city, state, exact)))
     connection.commit()
     connection.close()
 
