@@ -30,6 +30,8 @@ CHECK_INTERVAL_MINUTES = 15
 CAPTION_LIMIT = 1024
 MAX_STORED_RESULTS = 500
 STALE_TEXT = "Це старий пошук, зроби новий 🐾"
+NO_WATCHES_TEXT = "Наразі пошуків немає"
+WATCHES_PER_PAGE = 5
 CONVERTED_PRICE_THRESHOLD = 0.03
 CURRENCY_SIGNS = {"UAH": "грн", "USD": "$", "EUR": "€"}
 WEBAPP_URL = "https://tetianix.github.io/pounce_webapp/"
@@ -110,16 +112,35 @@ def build_watch_message(query, min_price, max_price):
     return f"{text} 🐾\nНапишу, коли з'явиться нове або подешевшає."
 
 
-def build_watch_card(watch):
-    price_text = format_price_range(watch["min_price"], watch["max_price"])
-    status = "Активна" if watch["is_active"] == 1 else "На паузі"
-    button_text = "⏸ Пауза" if watch["is_active"] == 1 else "▶️ Увімкнути"
-    text = f"🔍 {watch['query']}\nЦіна: {price_text}\n{status}"
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text=button_text, callback_data=f"pause:{watch['id']}"),
-        InlineKeyboardButton(text="🗑 Видалити", callback_data=f"delete:{watch['id']}")
-    ]])
-    return text, keyboard
+def count_pages(total):
+    return max(1, -(-total // WATCHES_PER_PAGE))
+
+
+def build_watches_list(watches, page):
+    if not watches:
+        return NO_WATCHES_TEXT, None
+    pages = count_pages(len(watches))
+    page = min(max(page, 0), pages - 1)
+    start = page * WATCHES_PER_PAGE
+    lines = [f"📌 Мої пошуки · {len(watches)}"]
+    rows = []
+    for number, watch in enumerate(watches[start:start + WATCHES_PER_PAGE], start + 1):
+        active = watch["is_active"] == 1
+        price_text = format_price_range(watch["min_price"], watch["max_price"])
+        status = "🟢 Активна" if active else "⏸ На паузі"
+        lines.append(f"\n{number}. {watch['query']}\n💰 {price_text} · {status}")
+        rows.append([
+            InlineKeyboardButton(text=f"{number}. {'⏸ Пауза' if active else '▶️ Увімкнути'}",
+                                 callback_data=f"pause:{watch['id']}:{page}"),
+            InlineKeyboardButton(text=f"{number}. 🗑 Видалити", callback_data=f"delete:{watch['id']}:{page}"),
+        ])
+    if pages > 1:
+        rows.append([
+            InlineKeyboardButton(text="◀️", callback_data=f"wpage:{page - 1}"),
+            InlineKeyboardButton(text=f"{page + 1} / {pages}", callback_data="noop"),
+            InlineKeyboardButton(text="▶️", callback_data=f"wpage:{page + 1}"),
+        ])
+    return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def format_number(value):
@@ -357,13 +378,8 @@ async def start_handler(message: Message):
 
 @dp.message(F.text == "📌 Мої пошуки")
 async def watches_handler(message: Message):
-    watches = get_user_watches(message.from_user.id)
-    if not watches:
-        await message.answer("Наразі пошуків немає")
-        return
-    for watch in watches:
-        text, keyboard = build_watch_card(watch)
-        await message.answer(text, reply_markup=keyboard)
+    text, keyboard = build_watches_list(get_user_watches(message.from_user.id), 0)
+    await message.answer(text, reply_markup=keyboard)
 
 
 @dp.message(F.text == "⭐ Обране")
@@ -558,23 +574,50 @@ async def unfav_handler(callback: CallbackQuery):
     await callback.answer("Прибрано з обраного")
 
 
+async def show_watches_page(callback, page):
+    text, keyboard = build_watches_list(get_user_watches(callback.from_user.id), page)
+    await callback.message.edit_text(text, reply_markup=keyboard)
+
+
+def get_own_watch(callback):
+    parts = callback.data.split(":")
+    if len(parts) != 3:
+        return None, 0
+    watch = get_watch(int(parts[1]))
+    if watch is None or watch["user_id"] != callback.from_user.id:
+        return None, 0
+    return watch, int(parts[2])
+
+
+@dp.callback_query(F.data.startswith("wpage:"))
+async def watches_page_handler(callback: CallbackQuery):
+    page = int(callback.data.split(":")[1])
+    if page < 0 or page >= count_pages(len(get_user_watches(callback.from_user.id))):
+        await callback.answer("Це край списку")
+        return
+    await show_watches_page(callback, page)
+    await callback.answer()
+
+
 @dp.callback_query(F.data.startswith("delete:"))
 async def delete_handler(callback: CallbackQuery):
-    parts = callback.data.split(":")
-    watch_id = int(parts[1])
-    delete_watch(watch_id)
-    await callback.message.delete()
-    await callback.answer("Видалено")
+    watch, page = get_own_watch(callback)
+    if watch is None:
+        await callback.answer(STALE_TEXT)
+        return
+    delete_watch(watch["id"])
+    await show_watches_page(callback, page)
+    await callback.answer(f"Видалено «{watch['query']}»")
 
 
 @dp.callback_query(F.data.startswith("pause:"))
 async def pause_handler(callback: CallbackQuery):
-    parts = callback.data.split(":")
-    watch_id = int(parts[1])
-    toggle_watch(watch_id)
-    watch = get_watch(watch_id)
-    text, keyboard = build_watch_card(watch)
-    await callback.message.edit_text(text, reply_markup=keyboard)
+    watch, page = get_own_watch(callback)
+    if watch is None:
+        await callback.answer(STALE_TEXT)
+        return
+    toggle_watch(watch["id"])
+    await show_watches_page(callback, page)
     await callback.answer()
 
 

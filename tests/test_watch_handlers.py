@@ -22,13 +22,15 @@ def make_ad():
             "link": "https://www.olx.ua/d/obyavlenie/sumka-bagllet-ID110gp8.html"}
 
 
-def make_callback(markup, user_id=1):
+def make_callback(markup=None, user_id=1, data=""):
     callback = MagicMock()
+    callback.data = data
     callback.from_user.id = user_id
     callback.message.chat.id = user_id
     callback.message.message_id = 10
     callback.message.reply_markup = markup
     callback.message.edit_reply_markup = AsyncMock()
+    callback.message.edit_text = AsyncMock()
     callback.message.answer = AsyncMock()
     callback.answer = AsyncMock()
     return callback
@@ -92,6 +94,99 @@ class UnwatchButtonTest(DatabaseTestCase):
         callback = make_callback(markup)
         await BOT["unwatch_button_handler"](callback)
         callback.answer.assert_awaited_once_with(BOT["STALE_TEXT"])
+
+
+class WatchesListTest(DatabaseTestCase):
+    def add_watches(self, count, user_id=1):
+        for number in range(1, count + 1):
+            self.db.save_watch(user_id, f"запит {number}", number * 1000, None)
+
+    def edited(self, callback):
+        args = callback.message.edit_text.await_args
+        return args.args[0], args.kwargs["reply_markup"]
+
+    def test_empty(self):
+        self.assertEqual(BOT["build_watches_list"]([], 0), (BOT["NO_WATCHES_TEXT"], None))
+
+    def test_newest_first_five_per_page(self):
+        self.add_watches(7)
+        text, markup = BOT["build_watches_list"](self.db.get_user_watches(1), 0)
+        self.assertTrue(text.startswith("📌 Мої пошуки · 7"))
+        self.assertIn("1. запит 7\n💰 до 7 000 грн · 🟢 Активна", text)
+        self.assertIn("5. запит 3", text)
+        self.assertNotIn("запит 2", text)
+        self.assertEqual(len(markup.inline_keyboard), 6)
+        self.assertEqual(button_texts(markup)[:2], ["1. ⏸ Пауза", "1. 🗑 Видалити"])
+        self.assertEqual(button_texts(markup)[-3:], ["◀️", "1 / 2", "▶️"])
+
+    def test_second_page_continues_numbering(self):
+        self.add_watches(7)
+        text, markup = BOT["build_watches_list"](self.db.get_user_watches(1), 1)
+        self.assertIn("6. запит 2", text)
+        self.assertIn("7. запит 1", text)
+        self.assertIn("2 / 2", button_texts(markup))
+
+    def test_single_page_has_no_navigation(self):
+        self.add_watches(5)
+        _, markup = BOT["build_watches_list"](self.db.get_user_watches(1), 0)
+        self.assertEqual(len(markup.inline_keyboard), 5)
+
+    async def test_pause_toggles_and_keeps_page(self):
+        self.add_watches(7)
+        watch_id = self.db.get_user_watches(1)[5]["id"]
+        callback = make_callback(data=f"pause:{watch_id}:1")
+        await BOT["pause_handler"](callback)
+        self.assertEqual(self.db.get_watch(watch_id)["is_active"], 0)
+        text, markup = self.edited(callback)
+        self.assertIn("6. запит 2\n💰 до 2 000 грн · ⏸ На паузі", text)
+        self.assertIn("6. ▶️ Увімкнути", button_texts(markup))
+
+    async def test_delete_last_on_page_moves_back(self):
+        self.add_watches(6)
+        watch_id = self.db.get_user_watches(1)[5]["id"]
+        callback = make_callback(data=f"delete:{watch_id}:1")
+        await BOT["delete_handler"](callback)
+        self.assertIsNone(self.db.get_watch(watch_id))
+        text, markup = self.edited(callback)
+        self.assertIn("📌 Мої пошуки · 5", text)
+        self.assertNotIn("◀️", button_texts(markup))
+        callback.answer.assert_awaited_once_with("Видалено «запит 1»")
+
+    async def test_delete_all(self):
+        self.add_watches(1)
+        watch_id = self.db.get_user_watches(1)[0]["id"]
+        callback = make_callback(data=f"delete:{watch_id}:0")
+        await BOT["delete_handler"](callback)
+        callback.message.edit_text.assert_awaited_once_with(BOT["NO_WATCHES_TEXT"], reply_markup=None)
+
+    async def test_other_users_watch_is_untouched(self):
+        self.add_watches(1, user_id=2)
+        watch_id = self.db.get_user_watches(2)[0]["id"]
+        for data in (f"delete:{watch_id}:0", f"pause:{watch_id}:0"):
+            callback = make_callback(data=data)
+            handler = BOT["delete_handler"] if data.startswith("delete") else BOT["pause_handler"]
+            await handler(callback)
+            callback.answer.assert_awaited_once_with(BOT["STALE_TEXT"])
+        self.assertEqual(self.db.get_watch(watch_id)["is_active"], 1)
+
+    async def test_old_card_button_is_stale(self):
+        self.add_watches(1)
+        watch_id = self.db.get_user_watches(1)[0]["id"]
+        callback = make_callback(data=f"delete:{watch_id}")
+        await BOT["delete_handler"](callback)
+        callback.answer.assert_awaited_once_with(BOT["STALE_TEXT"])
+        self.assertIsNotNone(self.db.get_watch(watch_id))
+
+    async def test_page_navigation(self):
+        self.add_watches(7)
+        callback = make_callback(data="wpage:1")
+        await BOT["watches_page_handler"](callback)
+        self.assertIn("6. запит 2", self.edited(callback)[0])
+        for data in ("wpage:2", "wpage:-1"):
+            callback = make_callback(data=data)
+            await BOT["watches_page_handler"](callback)
+            callback.answer.assert_awaited_once_with("Це край списку")
+            callback.message.edit_text.assert_not_awaited()
 
 
 if __name__ == "__main__":

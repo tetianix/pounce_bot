@@ -185,6 +185,7 @@ def get_user_watches(user_id):
                     SELECT * 
                     FROM watches 
                     WHERE user_id = ?
+                    ORDER BY id DESC
                     """, (user_id,))
     result = cursor.fetchall()
     connection.close()
