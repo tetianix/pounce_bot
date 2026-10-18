@@ -113,6 +113,14 @@ def load_photo(url):
     return FSInputFile("placeholder.jpg")
 
 
+async def fetch_ad_photo(ad):
+    return await asyncio.to_thread(get_ad_photo, ad)
+
+
+async def fetch_photo(url):
+    return await asyncio.to_thread(load_photo, url)
+
+
 def build_main_keyboard():
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -347,7 +355,7 @@ async def send_ad_card(chat_id, ad, prefix="", query=None):
             InlineKeyboardButton(text="🔗 Відкрити на OLX", url=ad['link']),
         ],
     ])
-    photo = await asyncio.to_thread(get_ad_photo, ad)
+    photo = await fetch_ad_photo(ad)
     try:
         await bot.send_photo(chat_id=chat_id, photo=photo, caption=text,
                              reply_markup=keyboard, parse_mode="HTML")
@@ -387,7 +395,7 @@ async def run_search(message, query, min_price=None, max_price=None, sort="new",
             track_price(ad)
         text, keyboard = build_ad_card(ads[0], 0, len(ads), watching=watching,
                                        user_id=message.from_user.id)
-        card = await message.answer_photo(photo=get_ad_photo(ads[0]), caption=text, reply_markup=keyboard,
+        card = await message.answer_photo(photo=await fetch_ad_photo(ads[0]), caption=text, reply_markup=keyboard,
                                           parse_mode="HTML")
         save_results(card, {
             "ads": ads,
@@ -532,7 +540,7 @@ async def saved_handler(message: Message):
         await message.answer("Обране порожнє")
         return
     text, keyboard = build_ad_card(ads[0], 0, len(ads), "fav")
-    card = await message.answer_photo(photo=get_ad_photo(ads[0]), caption=text, reply_markup=keyboard,
+    card = await message.answer_photo(photo=await fetch_ad_photo(ads[0]), caption=text, reply_markup=keyboard,
                                       parse_mode="HTML")
     save_results(card, {"ads": ads, "mode": "fav"})
 
@@ -553,7 +561,7 @@ async def nav_handler(callback: CallbackQuery):
     text, keyboard = build_ad_card(ad, index, len(ads), state["mode"], state.get("watching", False),
                                    callback.from_user.id)
     await callback.message.edit_media(
-        media=InputMediaPhoto(media=get_ad_photo(ad), caption=text, parse_mode="HTML"),
+        media=InputMediaPhoto(media=await fetch_ad_photo(ad), caption=text, parse_mode="HTML"),
         reply_markup=keyboard
     )
     await callback.answer()
@@ -596,7 +604,8 @@ async def photo_handler(callback: CallbackQuery):
     ad = state["ads"][details["index"]]
     keyboard = build_info_keyboard(ad, details["index"], photo_index, len(photos))
     await callback.message.edit_media(
-        media=InputMediaPhoto(media=load_photo(photos[photo_index]), caption=details["caption"], parse_mode="HTML"),
+        media=InputMediaPhoto(media=await fetch_photo(photos[photo_index]), caption=details["caption"],
+                              parse_mode="HTML"),
         reply_markup=keyboard
     )
     await callback.answer()
@@ -702,7 +711,7 @@ async def favdel_handler(callback: CallbackQuery):
     index = min(index, len(ads) - 1)
     text, keyboard = build_ad_card(ads[index], index, len(ads), "fav")
     await callback.message.edit_media(
-        media=InputMediaPhoto(media=get_ad_photo(ads[index]), caption=text, parse_mode="HTML"),
+        media=InputMediaPhoto(media=await fetch_ad_photo(ads[index]), caption=text, parse_mode="HTML"),
         reply_markup=keyboard
     )
     await callback.answer("Прибрано з обраного")
