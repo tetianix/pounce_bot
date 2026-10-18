@@ -136,7 +136,8 @@ def scrape(query, page=1, min_price=None, max_price=None, sort="new"):
 
     if response.status_code == 200:
         soup = BeautifulSoup(response.content, 'html.parser')
-        elements = soup.select('[data-cy="l-card"]')
+        grid = soup.select_one('[data-testid="listing-grid"]') or soup
+        elements = grid.select('[data-cy="l-card"]')
         results = []
         for card in elements:
             price = card.select_one('[data-testid="ad-price"]')
