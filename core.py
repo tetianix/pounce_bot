@@ -11,13 +11,13 @@ PERIODS = {
 }
 MAX_PERIOD_PAGES = 4
 
-def search(query, page=1, sources=None, min_price=None, max_price=None, sort="new"):
+def search(query, page=1, sources=None, min_price=None, max_price=None, sort="new", city=None, state=None):
     if sources is None:
         sources = list(SOURCES)
     results = []
     for source in sources:
         func = SOURCES[source]
-        found = func(query, page, min_price=min_price, max_price=max_price, sort=sort)
+        found = func(query, page, min_price=min_price, max_price=max_price, sort=sort, city=city, state=state)
         results.extend(found)
     return results
 
@@ -28,14 +28,14 @@ def sort_ads(ads, sort):
         return sorted(ads, key=lambda ad: (ad["price"] is None, -(ad["price"] or 0)))
     return sorted(ads, key=lambda ad: ad["published_day"], reverse=True)
 
-def search_recent(query, period, min_price=None, max_price=None, sort="new", now=None):
+def search_recent(query, period, min_price=None, max_price=None, sort="new", now=None, city=None, state=None):
     if now is None:
         now = datetime.now(timezone.utc)
     first_day = now.astimezone(KYIV).date() - timedelta(days=PERIODS[period] - 1)
     results = []
     seen = set()
     for page in range(1, MAX_PERIOD_PAGES + 1):
-        found = search(query, page, min_price=min_price, max_price=max_price, sort="new")
+        found = search(query, page, min_price=min_price, max_price=max_price, sort="new", city=city, state=state)
         new_ads = [ad for ad in found if (ad["source"], ad["id"]) not in seen]
         if not new_ads:
             break

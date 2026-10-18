@@ -40,6 +40,22 @@ class ScrapeTest(unittest.TestCase):
         ads, _ = self.scrape(html, "zzqxjwvkpl")
         self.assertEqual(ads, [])
 
+    def test_default_search_url_without_city_and_state(self):
+        _, get = self.scrape(page([]), "iphone", 2)
+        url = get.call_args.args[0]
+        params = get.call_args.kwargs["params"]
+        self.assertEqual(url, "https://www.olx.ua/uk/list/q-iphone/")
+        self.assertEqual(params["page"], 2)
+        self.assertNotIn("search[filter_enum_state][0]", params)
+
+    def test_city_goes_to_path_and_state_to_params(self):
+        _, get = self.scrape(page([]), "iphone", city="lviv", state="used", max_price=5000)
+        url = get.call_args.args[0]
+        params = get.call_args.kwargs["params"]
+        self.assertEqual(url, "https://www.olx.ua/uk/lvov/q-iphone/")
+        self.assertEqual(params["search[filter_enum_state][0]"], "used")
+        self.assertEqual(params["search[filter_float_price:to]"], 5000)
+
 
 if __name__ == "__main__":
     unittest.main()

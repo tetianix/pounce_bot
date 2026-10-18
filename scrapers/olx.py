@@ -10,6 +10,36 @@ SORTS = {
     "expensive": "filter_float_price:desc",
 }
 
+CITIES = {
+    "kyiv": {"slug": "kiev", "name": "Київ"},
+    "kharkiv": {"slug": "kharkov", "name": "Харків"},
+    "odesa": {"slug": "odessa", "name": "Одеса"},
+    "dnipro": {"slug": "dnepr", "name": "Дніпро"},
+    "lviv": {"slug": "lvov", "name": "Львів"},
+    "zaporizhzhia": {"slug": "zaporozhe", "name": "Запоріжжя"},
+    "vinnytsia": {"slug": "vinnitsa", "name": "Вінниця"},
+    "zhytomyr": {"slug": "zhitomir", "name": "Житомир"},
+    "ivano-frankivsk": {"slug": "ivano-frankovsk", "name": "Івано-Франківськ"},
+    "kropyvnytskyi": {"slug": "kropivnitskiy", "name": "Кропивницький"},
+    "lutsk": {"slug": "lutsk", "name": "Луцьк"},
+    "mykolaiv": {"slug": "nikolaev", "name": "Миколаїв"},
+    "poltava": {"slug": "poltava", "name": "Полтава"},
+    "rivne": {"slug": "rovno", "name": "Рівне"},
+    "sumy": {"slug": "sumy", "name": "Суми"},
+    "ternopil": {"slug": "ternopol", "name": "Тернопіль"},
+    "uzhhorod": {"slug": "uzhgorod", "name": "Ужгород"},
+    "kherson": {"slug": "kherson", "name": "Херсон"},
+    "khmelnytskyi": {"slug": "khmelnitskiy", "name": "Хмельницький"},
+    "cherkasy": {"slug": "cherkassy", "name": "Черкаси"},
+    "chernivtsi": {"slug": "chernovtsy", "name": "Чернівці"},
+    "chernihiv": {"slug": "chernigov", "name": "Чернігів"},
+}
+
+STATES = {
+    "new": "Нове",
+    "used": "Вживане",
+}
+
 KYIV = ZoneInfo("Europe/Kyiv")
 
 MONTHS = ["січня", "лютого", "березня", "квітня", "травня", "червня",
@@ -117,8 +147,9 @@ def format_published_date(text, now=None):
         label = label[0].lower() + label[1:]
     return prefix + label + YEAR_SUFFIX_RE.sub("", text[match.end():])
 
-def scrape(query, page=1, min_price=None, max_price=None, sort="new"):
-    url = f"https://www.olx.ua/uk/list/q-{query}/"
+def scrape(query, page=1, min_price=None, max_price=None, sort="new", city=None, state=None):
+    location = CITIES[city]["slug"] if city else "list"
+    url = f"https://www.olx.ua/uk/{location}/q-{query}/"
 
     params = {
         "page": page,
@@ -128,6 +159,8 @@ def scrape(query, page=1, min_price=None, max_price=None, sort="new"):
         params["search[filter_float_price:from]"] = min_price
     if max_price is not None:
         params["search[filter_float_price:to]"] = max_price
+    if state:
+        params["search[filter_enum_state][0]"] = state
     try:
         response = requests.get(url, params=params, timeout=10, impersonate="chrome")
     except Exception as e:

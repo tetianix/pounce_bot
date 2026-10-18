@@ -17,8 +17,9 @@ class FakeSearch:
         self.pages = pages
         self.calls = []
 
-    def __call__(self, query, page, min_price=None, max_price=None, sort="new"):
-        self.calls.append({"page": page, "min_price": min_price, "max_price": max_price, "sort": sort})
+    def __call__(self, query, page, min_price=None, max_price=None, sort="new", city=None, state=None):
+        self.calls.append({"page": page, "min_price": min_price, "max_price": max_price, "sort": sort,
+                           "city": city, "state": state})
         return [dict(item) for item in self.pages.get(page, [])]
 
 
@@ -89,6 +90,12 @@ class SearchRecentTest(unittest.TestCase):
                                    min_price=100, max_price=500, sort="cheap")
         self.assertEqual(calls[0]["sort"], "new")
         self.assertEqual((calls[0]["min_price"], calls[0]["max_price"]), (100, 500))
+
+    def test_city_and_state_passed_to_every_page(self):
+        pages = {1: [ad("a", "Сьогодні о 10:00")], 2: [ad("b", "Сьогодні о 09:00")]}
+        _, calls = self.run_search(pages, "1d", city="odesa", state="new")
+        self.assertEqual(len(calls), 3)
+        self.assertTrue(all(call["city"] == "odesa" and call["state"] == "new" for call in calls))
 
     def test_sort_new_puts_latest_day_first(self):
         pages = {1: [ad("old", "10 жовтня 2026 р."), ad("new", "Сьогодні о 10:00")]}
