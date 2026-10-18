@@ -1,7 +1,7 @@
 import unittest
 from datetime import date, datetime, timezone
 
-from scrapers.olx import fix_date, parse_published_date
+from scrapers.olx import fix_date, format_published_date, parse_published_date
 
 
 def utc(*args):
@@ -68,6 +68,43 @@ class ParsePublishedDateTest(unittest.TestCase):
     def test_empty(self):
         self.assertIsNone(parse_published_date("", self.now))
         self.assertIsNone(parse_published_date(None, self.now))
+
+
+class FormatPublishedDateTest(unittest.TestCase):
+    now = utc(2026, 10, 11, 9, 0)
+
+    def test_time_kept(self):
+        self.assertEqual(format_published_date("Вчора о 23:30", self.now), "Вчора о 23:30")
+        self.assertEqual(format_published_date("Сьогодні о 11:56", self.now), "Сьогодні о 11:56")
+
+    def test_yesterday(self):
+        self.assertEqual(format_published_date("10 жовтня 2026 р.", self.now), "Вчора")
+
+    def test_day_before_yesterday(self):
+        self.assertEqual(format_published_date("09 жовтня 2026 р.", self.now), "Позавчора")
+
+    def test_older_without_year(self):
+        self.assertEqual(format_published_date("08 жовтня 2026 р.", self.now), "8 жовтня")
+
+    def test_other_year_keeps_year(self):
+        self.assertEqual(format_published_date("28 грудня 2025 р.", self.now), "28 грудня 2025 р.")
+
+    def test_today_without_time(self):
+        self.assertEqual(format_published_date("11 жовтня 2026 р.", self.now), "Сьогодні")
+
+    def test_uses_kyiv_calendar(self):
+        self.assertEqual(format_published_date("11 жовтня 2026 р.", utc(2026, 10, 11, 22, 30)), "Вчора")
+
+    def test_keeps_prefix_and_lowercase(self):
+        self.assertEqual(format_published_date("Оновлено 10 жовтня 2026 р.", self.now), "Оновлено вчора")
+
+    def test_unknown_text_unchanged(self):
+        self.assertEqual(format_published_date("10 августа 2026 г.", self.now), "10 августа 2026 г.")
+        self.assertEqual(format_published_date("Сегодня в 16:33", self.now), "Сегодня в 16:33")
+
+    def test_empty(self):
+        self.assertEqual(format_published_date("", self.now), "")
+        self.assertIsNone(format_published_date(None, self.now))
 
 
 if __name__ == "__main__":

@@ -20,7 +20,7 @@ from filters import filter_by_price
 from database import (save_ad, get_link, save_watch, get_active_watches, ad_exists, get_user_watches,
                       get_watch, delete_watch, toggle_watch, get_last_price, save_price, save_favorite, get_favorites,
                       delete_favorite, get_max_price, is_favorite, migrate_price_currency)
-from scrapers.olx import scrape_details, download_photo, SORTS
+from scrapers.olx import scrape_details, download_photo, format_published_date, SORTS
 import asyncio
 import html
 import json
@@ -170,7 +170,7 @@ def format_details_price(ad, original):
 def format_ad_text(ad, show_max=True):
     name = html.escape(ad['name'])
     town = html.escape(ad['town'] or "")
-    date = html.escape(ad['published_date'] or "")
+    date = html.escape(format_published_date(ad['published_date']) or "")
     return f"<b>{name}</b>\n💰 {format_price_text(ad, show_max)}\n📍 {town}\n🕒 <i>{date}</i>"
 
 

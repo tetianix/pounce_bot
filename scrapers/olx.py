@@ -18,6 +18,8 @@ MONTHS = ["січня", "лютого", "березня", "квітня", "тр�
 DATE_RE = re.compile(r'^(.*?)(сьогодні|вчора) о (\d{1,2}):(\d{2})$', re.IGNORECASE)
 RELATIVE_RE = re.compile(r'(сьогодні|вчора) о (\d{1,2}):(\d{2})', re.IGNORECASE)
 FULL_DATE_RE = re.compile(r'(\d{1,2}) ([а-яіїєґʼ\']+) (\d{4})', re.IGNORECASE)
+YEAR_SUFFIX_RE = re.compile(r'^\s*р\.')
+RELATIVE_DAYS = ["Сьогодні", "Вчора", "Позавчора"]
 
 PRICE_RE = re.compile(r'(\d+(?: \d{3})*)(?:[.,](\d{1,2}))?(?!\d)')
 
@@ -90,6 +92,30 @@ def parse_published_date(text, now=None):
         except ValueError:
             return None
     return None
+
+def format_published_date(text, now=None):
+    if not text or RELATIVE_RE.search(text):
+        return text
+    match = FULL_DATE_RE.search(text)
+    if match is None:
+        return text
+    if now is None:
+        now = datetime.now(timezone.utc)
+    published = parse_published_date(match.group(0), now)
+    if published is None:
+        return text
+    today = now.astimezone(KYIV).date()
+    days_ago = (today - published).days
+    if 0 <= days_ago < len(RELATIVE_DAYS):
+        label = RELATIVE_DAYS[days_ago]
+    else:
+        label = f"{published.day} {MONTHS[published.month - 1]}"
+        if published.year != today.year:
+            label += f" {published.year} р."
+    prefix = text[:match.start()]
+    if prefix:
+        label = label[0].lower() + label[1:]
+    return prefix + label + YEAR_SUFFIX_RE.sub("", text[match.end():])
 
 def scrape(query, page=1, min_price=None, max_price=None, sort="new"):
     url = f"https://www.olx.ua/uk/list/q-{query}/"
