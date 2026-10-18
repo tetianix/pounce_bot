@@ -74,3 +74,60 @@ class PhotoThreadTest(DatabaseTestCase):
         await BOT["favdel_handler"](callback)
         self.assert_off_main_thread()
         self.assertEqual(self.edited_photo(callback), "ad:b")
+
+
+def no_details():
+    return {"description": "Опис лампи", "photos": [], "price": None}
+
+
+class OlxThreadTest(DatabaseTestCase):
+    def setUp(self):
+        super().setUp()
+        self.threads = []
+        self.patcher = patch.dict(BOT, {"get_ad_photo": lambda ad: "photo"})
+        self.patcher.start()
+
+    def tearDown(self):
+        self.patcher.stop()
+        super().tearDown()
+
+    def spy(self, result):
+        def call(*args, **kwargs):
+            self.threads.append(threading.current_thread())
+            return result
+        return call
+
+    def assert_off_main_thread(self):
+        self.assertEqual(len(self.threads), 1)
+        self.assertIsNot(self.threads[0], threading.main_thread())
+
+    async def test_search(self):
+        message = make_message()
+        with patch.dict(BOT, {"search": self.spy([named_ad("a", "Лампа")])}):
+            await BOT["run_search"](message, "лампа")
+        self.assert_off_main_thread()
+        message.answer_photo.assert_awaited_once()
+
+    async def test_search_for_period(self):
+        message = make_message()
+        with patch.dict(BOT, {"search_recent": self.spy([named_ad("a", "Лампа")])}):
+            await BOT["run_search"](message, "лампа", period="3d")
+        self.assert_off_main_thread()
+        message.answer_photo.assert_awaited_once()
+
+    async def test_carousel_details(self):
+        BOT["message_results"][(1, 10)] = {"ads": [named_ad("a", "Лампа")], "mode": "search"}
+        callback = make_callback(data="info:0")
+        callback.message.edit_caption = AsyncMock()
+        with patch.dict(BOT, {"scrape_details": self.spy(no_details())}):
+            await BOT["info_handler"](callback)
+        self.assert_off_main_thread()
+        self.assertIn("Опис лампи", callback.message.edit_caption.await_args.kwargs["caption"])
+
+    async def test_notification_details(self):
+        callback = make_callback(data="details:olx:a")
+        with patch.dict(BOT, {"scrape_details": self.spy(no_details()),
+                              "get_link": lambda ad_id, source: "https://www.olx.ua/d/a.html"}):
+            await BOT["details_handler"](callback)
+        self.assert_off_main_thread()
+        self.assertEqual(callback.message.answer.await_args.args[0], "Опис лампи")

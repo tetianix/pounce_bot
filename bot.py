@@ -369,10 +369,11 @@ async def run_search(message, query, min_price=None, max_price=None, sort="new",
     try:
         try:
             if period in PERIODS:
-                ads = search_recent(query, period, min_price=min_price, max_price=max_price, sort=sort,
-                                    city=city, state=state)
+                ads = await asyncio.to_thread(search_recent, query, period, min_price=min_price,
+                                              max_price=max_price, sort=sort, city=city, state=state)
             else:
-                ads = search(query, min_price=min_price, max_price=max_price, sort=sort, city=city, state=state)
+                ads = await asyncio.to_thread(search, query, min_price=min_price, max_price=max_price, sort=sort,
+                                              city=city, state=state)
         except OlxError as e:
             print("пошук: OLX не відповів:", e)
             await message.answer(OLX_DOWN_TEXT)
@@ -577,7 +578,7 @@ async def info_handler(callback: CallbackQuery):
         return
     ad = state["ads"][index]
 
-    details = scrape_details(ad['link'])
+    details = await asyncio.to_thread(scrape_details, ad['link'])
     text = build_info_caption(ad, details["description"], details["price"])
     state["details"] = {
         "index": index,
@@ -625,7 +626,7 @@ async def details_handler(callback: CallbackQuery):
     if link is None:
         await callback.answer("Опис не знайдено")
         return
-    details = scrape_details(link)
+    details = await asyncio.to_thread(scrape_details, link)
     media = []
     for url in details["photos"]:
         media.append(InputMediaPhoto(media=url))
