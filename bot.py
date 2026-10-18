@@ -16,12 +16,12 @@ from aiogram.types import (
 )
 from dotenv import load_dotenv
 from core import search, search_recent, PERIODS
-from filters import filter_by_price
+from filters import filter_by_price, filter_exact
 from database import (save_ad, get_link, save_watch, get_active_watches, ad_exists, get_user_watches,
                       get_watch, delete_watch, toggle_watch, get_last_price, save_price, save_favorite, get_favorites,
                       delete_favorite, get_max_price, is_favorite, migrate_price_currency, delete_user_watch,
                       migrate_watch_filters)
-from scrapers.olx import scrape_details, download_photo, format_published_date, SORTS
+from scrapers.olx import scrape_details, download_photo, format_published_date, SORTS, CITIES, STATES
 import asyncio
 import html
 import json
@@ -106,10 +106,23 @@ def format_price_range(min_price, max_price):
     return "будь-яка"
 
 
-def build_watch_message(query, min_price, max_price):
+def describe_filters(city=None, state=None, exact=False):
+    parts = []
+    if city in CITIES:
+        parts.append(CITIES[city]["name"])
+    if state in STATES:
+        parts.append(STATES[state].lower())
+    if exact:
+        parts.append("точний збіг")
+    return parts
+
+
+def build_watch_message(query, min_price, max_price, city=None, state=None, exact=False):
     text = f"Стежу за «{query}»"
     if min_price or max_price:
         text += f", {format_price_range(min_price, max_price)}"
+    for part in describe_filters(city, state, exact):
+        text += f", {part}"
     return f"{text} 🐾\nНапишу, коли з'явиться нове або подешевшає."
 
 
@@ -130,6 +143,9 @@ def build_watches_list(watches, page):
         price_text = format_price_range(watch["min_price"], watch["max_price"])
         status = "🟢 Активна" if active else "⏸ На паузі"
         lines.append(f"\n{number}. {watch['query']}\n💰 {price_text} · {status}")
+        filters = describe_filters(watch["city"], watch["state"], watch["exact"])
+        if filters:
+            lines.append("🔎 " + " · ".join(filters))
         rows.append([
             InlineKeyboardButton(text=f"{number}. {'⏸ Пауза' if active else '▶️ Увімкнути'}",
                                  callback_data=f"pause:{watch['id']}:{page}"),
@@ -304,18 +320,24 @@ async def send_ad_card(chat_id, ad, prefix="", query=None):
         await bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard, parse_mode="HTML")
 
 
-async def run_search(message, query, min_price=None, max_price=None, sort="new", watching=False, period="any"):
+async def run_search(message, query, min_price=None, max_price=None, sort="new", watching=False, period="any",
+                     city=None, state=None, exact=False):
     status = await message.answer("Шукаю...")
     try:
         if period in PERIODS:
-            ads = search_recent(query, period, min_price=min_price, max_price=max_price, sort=sort)
+            ads = search_recent(query, period, min_price=min_price, max_price=max_price, sort=sort,
+                                city=city, state=state)
         else:
-            ads = search(query, min_price=min_price, max_price=max_price, sort=sort)
+            ads = search(query, min_price=min_price, max_price=max_price, sort=sort, city=city, state=state)
         if max_price is not None or min_price is not None:
             ads = filter_by_price(ads, max_price=max_price, min_price=min_price)
+        if exact:
+            ads = filter_exact(ads, query)
         ads.sort(key=lambda ad: ad["promoted"])
         if not ads:
-            if min_price is not None or max_price is not None:
+            if describe_filters(city, state, exact):
+                await message.answer("Нічого не знайдено 😿\nСпробуй прибрати частину фільтрів або змінити запит")
+            elif min_price is not None or max_price is not None:
                 await message.answer("Нічого не знайдено 😿\nСпробуй розширити діапазон цін або змінити запит")
             else:
                 await message.answer("Нічого не знайдено 😿\nСпробуй коротший запит або інші слова")
@@ -333,6 +355,9 @@ async def run_search(message, query, min_price=None, max_price=None, sort="new",
             "query": query,
             "min_price": min_price,
             "max_price": max_price,
+            "city": city,
+            "state": state,
+            "exact": exact,
             "watching": watching,
         })
     finally:
@@ -348,8 +373,11 @@ async def check_watches():
         min_price = watch["min_price"]
         max_price = None if max_price == 0 else max_price
         min_price = None if min_price == 0 else min_price
-        ads = search(query, min_price=min_price, max_price=max_price)
+        ads = search(query, min_price=min_price, max_price=max_price, city=watch["city"] or None,
+                     state=watch["state"] or None)
         ads = filter_by_price(ads, max_price=max_price, min_price=min_price)
+        if watch["exact"]:
+            ads = filter_exact(ads, query)
         for ad in ads:
             is_new = not ad_exists(ad["id"], ad["source"])
             old_price = track_price(ad)
@@ -509,13 +537,16 @@ async def watch_button_handler(callback: CallbackQuery):
     if state is None or state["mode"] != "search":
         await callback.answer(STALE_TEXT)
         return
-    save_watch(callback.from_user.id, state["query"], state["max_price"], state["min_price"])
+    save_watch(callback.from_user.id, state["query"], state["max_price"], state["min_price"],
+               state.get("city"), state.get("state"), state.get("exact", False))
     state["watching"] = True
     new_button = InlineKeyboardButton(text="✅ Стежу", callback_data="unwatch")
     await callback.message.edit_reply_markup(
         reply_markup=replace_button(callback.message.reply_markup, "watch", new_button)
     )
-    await callback.message.answer(build_watch_message(state["query"], state["min_price"], state["max_price"]))
+    await callback.message.answer(build_watch_message(state["query"], state["min_price"], state["max_price"],
+                                                      state.get("city"), state.get("state"),
+                                                      state.get("exact", False)))
     await callback.answer()
 
 
@@ -525,7 +556,8 @@ async def unwatch_button_handler(callback: CallbackQuery):
     if state is None or state["mode"] != "search":
         await callback.answer(STALE_TEXT)
         return
-    delete_user_watch(callback.from_user.id, state["query"], state["max_price"], state["min_price"])
+    delete_user_watch(callback.from_user.id, state["query"], state["max_price"], state["min_price"],
+                      state.get("city"), state.get("state"), state.get("exact", False))
     state["watching"] = False
     new_button = InlineKeyboardButton(text="🔔 Стежити", callback_data="watch")
     await callback.message.edit_reply_markup(
@@ -648,15 +680,22 @@ async def webapp_handler(message: Message):
     period = data.get("period", "any")
     if not isinstance(period, str) or period not in PERIODS:
         period = "any"
+    city = data.get("city")
+    if not isinstance(city, str) or city not in CITIES:
+        city = None
+    state = data.get("state")
+    if not isinstance(state, str) or state not in STATES:
+        state = None
+    exact = data.get("exact") is True
 
     watching = data.get("watch") is True
     if watching:
-        save_watch(message.from_user.id, query, max_price, min_price)
+        save_watch(message.from_user.id, query, max_price, min_price, city, state, exact)
 
-    await run_search(message, query, min_price, max_price, sort, watching, period)
+    await run_search(message, query, min_price, max_price, sort, watching, period, city, state, exact)
 
     if watching:
-        await message.answer(build_watch_message(query, min_price, max_price))
+        await message.answer(build_watch_message(query, min_price, max_price, city, state, exact))
 
 
 @dp.message(F.text)
