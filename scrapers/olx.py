@@ -1,6 +1,6 @@
 from curl_cffi import requests
 import re
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, SoupStrainer
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -41,6 +41,8 @@ STATES = {
 }
 
 KYIV = ZoneInfo("Europe/Kyiv")
+
+LISTING_ONLY = SoupStrainer(attrs={"data-testid": "listing-grid"})
 
 MONTHS = ["січня", "лютого", "березня", "квітня", "травня", "червня",
           "липня", "серпня", "вересня", "жовтня", "листопада", "грудня"]
@@ -168,7 +170,7 @@ def scrape(query, page=1, min_price=None, max_price=None, sort="new", city=None,
         return []
 
     if response.status_code == 200:
-        soup = BeautifulSoup(response.content, 'html.parser')
+        soup = BeautifulSoup(response.content, 'html.parser', parse_only=LISTING_ONLY)
         grid = soup.select_one('[data-testid="listing-grid"]') or soup
         elements = grid.select('[data-cy="l-card"]')
         results = []
