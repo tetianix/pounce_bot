@@ -26,10 +26,13 @@ import asyncio
 import html
 import json
 import os
+from time import monotonic
 
 CHECK_INTERVAL_MINUTES = 15
 CAPTION_LIMIT = 1024
-MAX_STORED_RESULTS = 500
+MAX_STORED_RESULTS = 200
+MAX_RESULTS_PER_CHAT = 10
+RESULTS_TTL_SECONDS = 3600
 STALE_TEXT = "Це старий пошук, зроби новий 🐾"
 NO_WATCHES_TEXT = "Наразі пошуків немає"
 WATCHES_PER_PAGE = 5
@@ -44,14 +47,39 @@ dp = Dispatcher()
 message_results = {}
 
 
+def drop_expired_results(now):
+    while message_results:
+        key = next(iter(message_results))
+        if now - message_results[key].get("used_at", now) < RESULTS_TTL_SECONDS:
+            break
+        del message_results[key]
+
+
 def save_results(message, state):
-    message_results[(message.chat.id, message.message_id)] = state
+    now = monotonic()
+    drop_expired_results(now)
+    state["used_at"] = now
+    chat_id = message.chat.id
+    message_results[(chat_id, message.message_id)] = state
+    chat_keys = [key for key in message_results if key[0] == chat_id]
+    for key in chat_keys[:-MAX_RESULTS_PER_CHAT]:
+        del message_results[key]
     while len(message_results) > MAX_STORED_RESULTS:
         del message_results[next(iter(message_results))]
 
 
 def get_results(callback):
-    return message_results.get((callback.message.chat.id, callback.message.message_id))
+    now = monotonic()
+    drop_expired_results(now)
+    key = (callback.message.chat.id, callback.message.message_id)
+    state = message_results.pop(key, None)
+    if state is None:
+        return None
+    if now - state.get("used_at", now) >= RESULTS_TTL_SECONDS:
+        return None
+    state["used_at"] = now
+    message_results[key] = state
+    return state
 
 
 def parse_price(value):
