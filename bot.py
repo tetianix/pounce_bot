@@ -347,8 +347,9 @@ async def send_ad_card(chat_id, ad, prefix="", query=None):
             InlineKeyboardButton(text="🔗 Відкрити на OLX", url=ad['link']),
         ],
     ])
+    photo = await asyncio.to_thread(get_ad_photo, ad)
     try:
-        await bot.send_photo(chat_id=chat_id, photo=get_ad_photo(ad), caption=text,
+        await bot.send_photo(chat_id=chat_id, photo=photo, caption=text,
                              reply_markup=keyboard, parse_mode="HTML")
     except TelegramBadRequest:
         await bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard, parse_mode="HTML")

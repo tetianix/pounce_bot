@@ -1,6 +1,7 @@
 import io
 import os
 import tempfile
+import threading
 from contextlib import redirect_stdout
 import unittest
 from pathlib import Path
@@ -100,6 +101,19 @@ class CheckWatchesTest(WatchesTestCase):
         self.assertIn("📉 Подешевшало: 2 200 → 2 000 грн", caption)
         self.assertIn("💰 2 000 грн\n", caption)
         self.assertNotIn("було", caption)
+
+    async def test_photo_is_prepared_outside_event_loop_thread(self):
+        threads = []
+
+        def photo(ad):
+            threads.append(threading.current_thread())
+            return "photo"
+
+        with patch.dict(BOT, {"get_ad_photo": photo}):
+            await BOT["check_watches"]()
+        self.assertEqual(len(threads), 1)
+        self.assertIsNot(threads[0], threading.main_thread())
+        self.assertEqual(self.fake_bot.send_photo.await_args.kwargs["photo"], "photo")
 
     async def test_new_ad_has_no_max_line(self):
         import database
