@@ -1,8 +1,9 @@
 import os
-import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
+
+from tests.db_helper import drop_memory_database, use_memory_database
 
 BOT = {}
 ROOT = Path(__file__).resolve().parent.parent
@@ -42,21 +43,13 @@ def button_texts(markup):
 
 class DatabaseTestCase(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.old_cwd = os.getcwd()
-        os.chdir(self.tmp.name)
+        use_memory_database()
         import database
         self.db = database
-        database.create_table()
-        database.create_watches_table()
-        database.create_price_history_table()
-        database.create_favorites_table()
-        database.migrate_price_currency()
 
     def tearDown(self):
         BOT["message_results"].clear()
-        os.chdir(self.old_cwd)
-        self.tmp.cleanup()
+        drop_memory_database()
 
 
 class UnwatchButtonTest(DatabaseTestCase):

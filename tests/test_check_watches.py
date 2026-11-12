@@ -1,12 +1,12 @@
 import io
 import os
-import tempfile
 import threading
 from contextlib import redirect_stdout
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from tests.db_helper import drop_memory_database, use_memory_database
 from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError
 
 BOT = {}
@@ -29,15 +29,8 @@ def make_ad(price=2200):
 
 class WatchesTestCase(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.old_cwd = os.getcwd()
-        os.chdir(self.tmp.name)
+        use_memory_database()
         import database
-        database.create_table()
-        database.create_watches_table()
-        database.create_price_history_table()
-        database.create_favorites_table()
-        database.migrate_price_currency()
         database.save_watch(1, "bagllet сумка", 0, 0)
         self.ads = [make_ad()]
         self.fake_bot = MagicMock()
@@ -52,8 +45,7 @@ class WatchesTestCase(unittest.IsolatedAsyncioTestCase):
 
     def tearDown(self):
         self.patcher.stop()
-        os.chdir(self.old_cwd)
-        self.tmp.cleanup()
+        drop_memory_database()
 
 
 class CheckWatchesTest(WatchesTestCase):
