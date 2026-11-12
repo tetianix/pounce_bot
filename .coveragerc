@@ -4,6 +4,7 @@ branch = True
 omit =
     tests/*
     .venv/*
+    alembic/*
 
 [report]
 exclude_lines =
