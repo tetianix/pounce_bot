@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, ForeignKeyConstraint, Integer, MetaData, Text, UniqueConstraint
+from sqlalchemy import BigInteger, ForeignKeyConstraint, Integer, MetaData, PrimaryKeyConstraint, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 NAMING_CONVENTION = {
@@ -15,9 +15,10 @@ class Base(DeclarativeBase):
 
 class Ad(Base):
     __tablename__ = "ads"
+    __table_args__ = (PrimaryKeyConstraint("source", "id"),)
 
-    id: Mapped[str] = mapped_column(Text, primary_key=True)
-    source: Mapped[str] = mapped_column(Text, primary_key=True)
+    id: Mapped[str] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(Text)
     name: Mapped[str] = mapped_column(Text)
     price: Mapped[int | None] = mapped_column(Integer)
     town: Mapped[str | None] = mapped_column(Text)
