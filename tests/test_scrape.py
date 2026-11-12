@@ -1,5 +1,6 @@
-import unittest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from scrapers import olx
 
@@ -16,62 +17,58 @@ def page(*grids):
     return f"<html><body>{body}</body></html>"
 
 
-def fake_get(html):
-    response = MagicMock()
-    response.status_code = 200
-    response.content = html.encode("utf-8")
-    return MagicMock(return_value=response)
+@pytest.fixture
+def olx_get():
+    response = MagicMock(status_code=200, content=page([]).encode("utf-8"))
+    with patch.object(olx.requests, "get", return_value=response) as get:
+        yield get
 
 
-class ScrapeTest(unittest.TestCase):
-    def scrape(self, html, *args, **kwargs):
-        get = fake_get(html)
-        with patch.object(olx.requests, "get", get):
-            result = olx.scrape(*args, **kwargs)
-        return result, get
-
-    def test_ignores_cards_from_other_locations_grid(self):
-        html = page([card("a"), card("b")], [card("other", "Дніпро")])
-        ads, _ = self.scrape(html, "iphone")
-        self.assertEqual([ad["id"] for ad in ads], ["a", "b"])
-
-    def test_no_results_ignores_suggested_ads(self):
-        html = page([], [card("ad1", "Дніпро"), card("ad2", "Харків")])
-        ads, _ = self.scrape(html, "zzqxjwvkpl")
-        self.assertEqual(ads, [])
-
-    def test_default_search_url_without_city_and_state(self):
-        _, get = self.scrape(page([]), "iphone", 2)
-        url = get.call_args.args[0]
-        params = get.call_args.kwargs["params"]
-        self.assertEqual(url, "https://www.olx.ua/uk/list/q-iphone/")
-        self.assertEqual(params["page"], 2)
-        self.assertNotIn("search[filter_enum_state][0]", params)
-
-    def test_city_goes_to_path_and_state_to_params(self):
-        _, get = self.scrape(page([]), "iphone", city="lviv", state="used", max_price=5000)
-        url = get.call_args.args[0]
-        params = get.call_args.kwargs["params"]
-        self.assertEqual(url, "https://www.olx.ua/uk/lvov/q-iphone/")
-        self.assertEqual(params["search[filter_enum_state][0]"], "used")
-        self.assertEqual(params["search[filter_float_price:to]"], 5000)
-
-    def test_timeout_raises_olx_error(self):
-        get = MagicMock(side_effect=olx.requests.exceptions.Timeout("curl: (28) Operation timed out"))
-        with patch.object(olx.requests, "get", get), self.assertRaisesRegex(olx.OlxError, "таймаут"):
-            olx.scrape("iphone")
-
-    def test_network_failure_raises_olx_error(self):
-        get = MagicMock(side_effect=ConnectionError("reset"))
-        with patch.object(olx.requests, "get", get), self.assertRaisesRegex(olx.OlxError, "мережа"):
-            olx.scrape("iphone")
-
-    def test_bad_status_raises_olx_error(self):
-        get = fake_get("")
-        get.return_value.status_code = 429
-        with patch.object(olx.requests, "get", get), self.assertRaisesRegex(olx.OlxError, "HTTP 429"):
-            olx.scrape("iphone")
+def serve(olx_get, html):
+    olx_get.return_value.content = html.encode("utf-8")
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_ignores_cards_from_other_locations_grid(olx_get):
+    serve(olx_get, page([card("a"), card("b")], [card("other", "Дніпро")]))
+    assert [ad["id"] for ad in olx.scrape("iphone")] == ["a", "b"]
+
+
+def test_no_results_ignores_suggested_ads(olx_get):
+    serve(olx_get, page([], [card("ad1", "Дніпро"), card("ad2", "Харків")]))
+    assert olx.scrape("zzqxjwvkpl") == []
+
+
+def test_default_search_url_without_city_and_state(olx_get):
+    olx.scrape("iphone", 2)
+    url = olx_get.call_args.args[0]
+    params = olx_get.call_args.kwargs["params"]
+    assert url == "https://www.olx.ua/uk/list/q-iphone/"
+    assert params["page"] == 2
+    assert "search[filter_enum_state][0]" not in params
+
+
+def test_city_goes_to_path_and_state_to_params(olx_get):
+    olx.scrape("iphone", city="lviv", state="used", max_price=5000)
+    url = olx_get.call_args.args[0]
+    params = olx_get.call_args.kwargs["params"]
+    assert url == "https://www.olx.ua/uk/lvov/q-iphone/"
+    assert params["search[filter_enum_state][0]"] == "used"
+    assert params["search[filter_float_price:to]"] == 5000
+
+
+def test_timeout_raises_olx_error(olx_get):
+    olx_get.side_effect = olx.requests.exceptions.Timeout("curl: (28) Operation timed out")
+    with pytest.raises(olx.OlxError, match="таймаут"):
+        olx.scrape("iphone")
+
+
+def test_network_failure_raises_olx_error(olx_get):
+    olx_get.side_effect = ConnectionError("reset")
+    with pytest.raises(olx.OlxError, match="мережа"):
+        olx.scrape("iphone")
+
+
+def test_bad_status_raises_olx_error(olx_get):
+    olx_get.return_value.status_code = 429
+    with pytest.raises(olx.OlxError, match="HTTP 429"):
+        olx.scrape("iphone")

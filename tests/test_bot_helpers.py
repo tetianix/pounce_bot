@@ -1,91 +1,51 @@
-import os
-import unittest
-from pathlib import Path
-
-BOT = {}
+import pytest
 
 
-def setUpModule():
-    os.environ.setdefault("BOT_TOKEN", "123456:TESTTOKENtesttokenTESTTOKENtesttoken")
-    path = Path(__file__).resolve().parent.parent / "bot.py"
-    source = path.read_text(encoding="utf-8").replace("asyncio.run(main())", "")
-    exec(compile(source, str(path), "exec"), BOT)
+@pytest.mark.parametrize("min_price, max_price, text", [
+    (300, 700, "300–700 грн"),
+    (1500, None, "від 1 500 грн"),
+    (1500, 30000, "1 500–30 000 грн"),
+    (None, 300, "до 300 грн"),
+    (None, 12000, "до 12 000 грн"),
+    (None, None, "будь-яка"),
+    (0, 0, "будь-яка"),
+    (0, 700, "до 700 грн"),
+], ids=["both", "only-min", "both-thousands", "only-max", "only-max-thousands", "none",
+        "zero-means-no-limit", "zero-min-with-max"])
+def test_format_price_range(app, min_price, max_price, text):
+    assert app["format_price_range"](min_price, max_price) == text
 
 
-class FormatPriceRangeTest(unittest.TestCase):
-    def test_both(self):
-        self.assertEqual(BOT["format_price_range"](300, 700), "300–700 грн")
-
-    def test_only_min(self):
-        self.assertEqual(BOT["format_price_range"](1500, None), "від 1 500 грн")
-
-    def test_both_with_thousands(self):
-        self.assertEqual(BOT["format_price_range"](1500, 30000), "1 500–30 000 грн")
-
-    def test_only_max(self):
-        self.assertEqual(BOT["format_price_range"](None, 300), "до 300 грн")
-
-    def test_only_max_with_thousands(self):
-        self.assertEqual(BOT["format_price_range"](None, 12000), "до 12 000 грн")
-
-    def test_none(self):
-        self.assertEqual(BOT["format_price_range"](None, None), "будь-яка")
-
-    def test_zero_from_watches_table_means_no_limit(self):
-        self.assertEqual(BOT["format_price_range"](0, 0), "будь-яка")
-        self.assertEqual(BOT["format_price_range"](0, 700), "до 700 грн")
+@pytest.mark.parametrize("args, text", [
+    ((22458, "UAH"), "22 458 грн"),
+    ((300, "UAH"), "300 грн"),
+    ((22458, "UAH", True), "≈ 22 458 грн"),
+    ((500, "USD"), "500 $"),
+    ((450, "EUR"), "450 €"),
+    ((100, None), "100 грн"),
+], ids=["uah-thousands", "small", "converted", "usd", "eur", "unknown-currency-is-uah"])
+def test_format_money(app, args, text):
+    assert app["format_money"](*args) == text
 
 
-class FormatMoneyTest(unittest.TestCase):
-    def test_uah_with_thousands(self):
-        self.assertEqual(BOT["format_money"](22458, "UAH"), "22 458 грн")
-
-    def test_small(self):
-        self.assertEqual(BOT["format_money"](300, "UAH"), "300 грн")
-
-    def test_converted(self):
-        self.assertEqual(BOT["format_money"](22458, "UAH", True), "≈ 22 458 грн")
-
-    def test_usd(self):
-        self.assertEqual(BOT["format_money"](500, "USD"), "500 $")
-
-    def test_eur(self):
-        self.assertEqual(BOT["format_money"](450, "EUR"), "450 €")
-
-    def test_unknown_currency_falls_back_to_uah(self):
-        self.assertEqual(BOT["format_money"](100, None), "100 грн")
+@pytest.mark.parametrize("old, new, converted, real", [
+    (1500, 1490, False, True),
+    (1500, 1500, False, False),
+    (10000, 10300, True, False),
+    (10000, 9700, True, False),
+    (10000, 10301, True, True),
+    (10000, 9000, True, True),
+], ids=["uah-any-change", "uah-same", "converted-small-up", "converted-small-down",
+        "converted-big-up", "converted-big-down"])
+def test_is_real_change(app, old, new, converted, real):
+    assert app["is_real_change"](old, new, converted) is real
 
 
-class IsRealChangeTest(unittest.TestCase):
-    def test_uah_any_change(self):
-        self.assertTrue(BOT["is_real_change"](1500, 1490, False))
-
-    def test_uah_same(self):
-        self.assertFalse(BOT["is_real_change"](1500, 1500, False))
-
-    def test_converted_small_change_ignored(self):
-        self.assertFalse(BOT["is_real_change"](10000, 10300, True))
-        self.assertFalse(BOT["is_real_change"](10000, 9700, True))
-
-    def test_converted_big_change_counts(self):
-        self.assertTrue(BOT["is_real_change"](10000, 10301, True))
-        self.assertTrue(BOT["is_real_change"](10000, 9000, True))
-
-
-class FormatPriceChangeTest(unittest.TestCase):
-    def test_cheaper(self):
-        self.assertEqual(BOT["format_price_change"](2200, 2000, "UAH"), "📉 Подешевшало: 2 200 → 2 000 грн")
-
-    def test_more_expensive(self):
-        self.assertEqual(BOT["format_price_change"](2000, 2500, "UAH"), "📈 Подорожчало: 2 000 → 2 500 грн")
-
-    def test_usd(self):
-        self.assertEqual(BOT["format_price_change"](500, 450, "USD"), "📉 Подешевшало: 500 → 450 $")
-
-    def test_converted(self):
-        self.assertEqual(BOT["format_price_change"](22458, 20000, "UAH", True),
-                         "📉 Подешевшало: ≈ 22 458 → 20 000 грн")
-
-
-if __name__ == "__main__":
-    unittest.main()
+@pytest.mark.parametrize("args, text", [
+    ((2200, 2000, "UAH"), "📉 Подешевшало: 2 200 → 2 000 грн"),
+    ((2000, 2500, "UAH"), "📈 Подорожчало: 2 000 → 2 500 грн"),
+    ((500, 450, "USD"), "📉 Подешевшало: 500 → 450 $"),
+    ((22458, 20000, "UAH", True), "📉 Подешевшало: ≈ 22 458 → 20 000 грн"),
+], ids=["cheaper", "more-expensive", "usd", "converted"])
+def test_format_price_change(app, args, text):
+    assert app["format_price_change"](*args) == text

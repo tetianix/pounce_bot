@@ -1,5 +1,6 @@
-import unittest
 from datetime import date, datetime, timezone
+
+import pytest
 
 from scrapers.olx import fix_date, format_published_date, parse_published_date
 
@@ -8,104 +9,57 @@ def utc(*args):
     return datetime(*args, tzinfo=timezone.utc)
 
 
-class FixDateTest(unittest.TestCase):
-    def test_today_moves_three_hours_in_summer_time(self):
-        self.assertEqual(fix_date("Сьогодні о 08:56", utc(2026, 10, 11, 9, 14)), "Сьогодні о 11:56")
-
-    def test_yesterday(self):
-        self.assertEqual(fix_date("Вчора о 12:00", utc(2026, 10, 11, 9, 14)), "Вчора о 15:00")
-
-    def test_winter_time_is_two_hours(self):
-        self.assertEqual(fix_date("Сьогодні о 08:56", utc(2026, 11, 15, 9, 0)), "Сьогодні о 10:56")
-
-    def test_after_midnight_in_kyiv_stays_today(self):
-        self.assertEqual(fix_date("Сьогодні о 22:30", utc(2026, 10, 11, 22, 40)), "Сьогодні о 01:30")
-
-    def test_before_midnight_in_kyiv_becomes_yesterday(self):
-        self.assertEqual(fix_date("Сьогодні о 20:30", utc(2026, 10, 11, 22, 40)), "Вчора о 23:30")
-
-    def test_utc_yesterday_becomes_kyiv_today(self):
-        self.assertEqual(fix_date("Вчора о 22:30", utc(2026, 10, 11, 5, 0)), "Сьогодні о 01:30")
-
-    def test_two_days_ago_in_kyiv_becomes_full_date(self):
-        self.assertEqual(fix_date("Вчора о 08:00", utc(2026, 10, 11, 22, 30)), "10 жовтня 2026 р.")
-
-    def test_keeps_prefix_and_lowercase(self):
-        self.assertEqual(fix_date("Оновлено сьогодні о 08:56", utc(2026, 10, 11, 9, 14)),
-                         "Оновлено сьогодні о 11:56")
-
-    def test_full_date_unchanged(self):
-        self.assertEqual(fix_date("09 жовтня 2026 р.", utc(2026, 10, 11, 9, 14)), "09 жовтня 2026 р.")
+NOW = utc(2026, 10, 11, 9, 0)
 
 
-class ParsePublishedDateTest(unittest.TestCase):
-    now = utc(2026, 10, 11, 9, 0)
-
-    def test_today(self):
-        self.assertEqual(parse_published_date("Сьогодні о 11:56", self.now), date(2026, 10, 11))
-
-    def test_yesterday(self):
-        self.assertEqual(parse_published_date("Вчора о 23:30", self.now), date(2026, 10, 10))
-
-    def test_with_prefix(self):
-        self.assertEqual(parse_published_date("Оновлено сьогодні о 11:56", self.now), date(2026, 10, 11))
-
-    def test_today_uses_kyiv_calendar(self):
-        self.assertEqual(parse_published_date("Сьогодні о 01:30", utc(2026, 10, 11, 22, 40)), date(2026, 10, 12))
-
-    def test_full_date(self):
-        self.assertEqual(parse_published_date("09 жовтня 2026 р.", self.now), date(2026, 10, 9))
-
-    def test_full_date_single_digit_day(self):
-        self.assertEqual(parse_published_date("3 березня 2026 р.", self.now), date(2026, 3, 3))
-
-    def test_unknown_month(self):
-        self.assertIsNone(parse_published_date("09 октября 2026 г.", self.now))
-
-    def test_impossible_date(self):
-        self.assertIsNone(parse_published_date("31 лютого 2026 р.", self.now))
-
-    def test_empty(self):
-        self.assertIsNone(parse_published_date("", self.now))
-        self.assertIsNone(parse_published_date(None, self.now))
+@pytest.mark.parametrize("text, now, result", [
+    ("Сьогодні о 08:56", utc(2026, 10, 11, 9, 14), "Сьогодні о 11:56"),
+    ("Вчора о 12:00", utc(2026, 10, 11, 9, 14), "Вчора о 15:00"),
+    ("Сьогодні о 08:56", utc(2026, 11, 15, 9, 0), "Сьогодні о 10:56"),
+    ("Сьогодні о 22:30", utc(2026, 10, 11, 22, 40), "Сьогодні о 01:30"),
+    ("Сьогодні о 20:30", utc(2026, 10, 11, 22, 40), "Вчора о 23:30"),
+    ("Вчора о 22:30", utc(2026, 10, 11, 5, 0), "Сьогодні о 01:30"),
+    ("Вчора о 08:00", utc(2026, 10, 11, 22, 30), "10 жовтня 2026 р."),
+    ("Оновлено сьогодні о 08:56", utc(2026, 10, 11, 9, 14), "Оновлено сьогодні о 11:56"),
+    ("09 жовтня 2026 р.", utc(2026, 10, 11, 9, 14), "09 жовтня 2026 р."),
+], ids=["today-summer", "yesterday", "today-winter", "after-midnight-in-kyiv", "before-midnight-in-kyiv",
+        "utc-yesterday-is-kyiv-today", "two-days-ago-full-date", "keeps-prefix", "full-date-unchanged"])
+def test_fix_date_moves_utc_to_kyiv(text, now, result):
+    assert fix_date(text, now) == result
 
 
-class FormatPublishedDateTest(unittest.TestCase):
-    now = utc(2026, 10, 11, 9, 0)
-
-    def test_time_kept(self):
-        self.assertEqual(format_published_date("Вчора о 23:30", self.now), "Вчора о 23:30")
-        self.assertEqual(format_published_date("Сьогодні о 11:56", self.now), "Сьогодні о 11:56")
-
-    def test_yesterday(self):
-        self.assertEqual(format_published_date("10 жовтня 2026 р.", self.now), "Вчора")
-
-    def test_day_before_yesterday(self):
-        self.assertEqual(format_published_date("09 жовтня 2026 р.", self.now), "Позавчора")
-
-    def test_older_without_year(self):
-        self.assertEqual(format_published_date("08 жовтня 2026 р.", self.now), "8 жовтня")
-
-    def test_other_year_keeps_year(self):
-        self.assertEqual(format_published_date("28 грудня 2025 р.", self.now), "28 грудня 2025 р.")
-
-    def test_today_without_time(self):
-        self.assertEqual(format_published_date("11 жовтня 2026 р.", self.now), "Сьогодні")
-
-    def test_uses_kyiv_calendar(self):
-        self.assertEqual(format_published_date("11 жовтня 2026 р.", utc(2026, 10, 11, 22, 30)), "Вчора")
-
-    def test_keeps_prefix_and_lowercase(self):
-        self.assertEqual(format_published_date("Оновлено 10 жовтня 2026 р.", self.now), "Оновлено вчора")
-
-    def test_unknown_text_unchanged(self):
-        self.assertEqual(format_published_date("10 августа 2026 г.", self.now), "10 августа 2026 г.")
-        self.assertEqual(format_published_date("Сегодня в 16:33", self.now), "Сегодня в 16:33")
-
-    def test_empty(self):
-        self.assertEqual(format_published_date("", self.now), "")
-        self.assertIsNone(format_published_date(None, self.now))
+@pytest.mark.parametrize("text, now, result", [
+    ("Сьогодні о 11:56", NOW, date(2026, 10, 11)),
+    ("Вчора о 23:30", NOW, date(2026, 10, 10)),
+    ("Оновлено сьогодні о 11:56", NOW, date(2026, 10, 11)),
+    ("Сьогодні о 01:30", utc(2026, 10, 11, 22, 40), date(2026, 10, 12)),
+    ("09 жовтня 2026 р.", NOW, date(2026, 10, 9)),
+    ("3 березня 2026 р.", NOW, date(2026, 3, 3)),
+    ("09 октября 2026 г.", NOW, None),
+    ("31 лютого 2026 р.", NOW, None),
+    ("", NOW, None),
+    (None, NOW, None),
+], ids=["today", "yesterday", "prefix", "kyiv-calendar", "full-date", "single-digit-day", "unknown-month",
+        "impossible-date", "empty", "none"])
+def test_parse_published_date(text, now, result):
+    assert parse_published_date(text, now) == result
 
 
-if __name__ == "__main__":
-    unittest.main()
+@pytest.mark.parametrize("text, now, result", [
+    ("Вчора о 23:30", NOW, "Вчора о 23:30"),
+    ("Сьогодні о 11:56", NOW, "Сьогодні о 11:56"),
+    ("10 жовтня 2026 р.", NOW, "Вчора"),
+    ("09 жовтня 2026 р.", NOW, "Позавчора"),
+    ("08 жовтня 2026 р.", NOW, "8 жовтня"),
+    ("28 грудня 2025 р.", NOW, "28 грудня 2025 р."),
+    ("11 жовтня 2026 р.", NOW, "Сьогодні"),
+    ("11 жовтня 2026 р.", utc(2026, 10, 11, 22, 30), "Вчора"),
+    ("Оновлено 10 жовтня 2026 р.", NOW, "Оновлено вчора"),
+    ("10 августа 2026 г.", NOW, "10 августа 2026 г."),
+    ("Сегодня в 16:33", NOW, "Сегодня в 16:33"),
+    ("", NOW, ""),
+    (None, NOW, None),
+], ids=["time-kept-yesterday", "time-kept-today", "yesterday", "day-before-yesterday", "older-no-year",
+        "other-year", "today", "kyiv-calendar", "prefix", "russian-month", "russian-text", "empty", "none"])
+def test_format_published_date(text, now, result):
+    assert format_published_date(text, now) == result
