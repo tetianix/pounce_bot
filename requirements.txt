@@ -3,3 +3,6 @@ APScheduler==3.11.3
 beautifulsoup4>=4.12
 curl_cffi==0.16.2
 python-dotenv==1.2.2
+SQLAlchemy>=2.0,<2.1
+alembic>=1.13
+psycopg[binary]>=3.2
