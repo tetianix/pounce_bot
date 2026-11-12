@@ -6,3 +6,7 @@ database.db
 shafa.html
 CLAUDE.md
 backups/
+htmlcov/
+.coverage
+coverage.xml
+.pytest_cache/
