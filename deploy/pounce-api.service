@@ -1,0 +1,15 @@
+[Unit]
+Description=Pounce API (FastAPI + uvicorn)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/bot
+ExecStart=/home/ubuntu/bot/.venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000 --workers 1
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
