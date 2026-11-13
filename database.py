@@ -88,6 +88,14 @@ def get_max_price(ad_id, ad_source, currency):
                    PriceHistory.currency == currency)).scalar_one()
 
 
+def get_price_history(ad_id, ad_source):
+    with db.Session() as session:
+        return session.execute(
+            select(PriceHistory.price, PriceHistory.currency, PriceHistory.changed_at)
+            .where(PriceHistory.ad_id == ad_id, PriceHistory.ad_source == ad_source)
+            .order_by(PriceHistory.id)).mappings().all()
+
+
 def get_user_watches(user_id):
     with db.Session() as session:
         return session.execute(

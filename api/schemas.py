@@ -2,8 +2,10 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from core import SOURCES
 from scrapers.olx import CITIES, SORTS, STATES
 
+SourceKey = Literal[tuple(SOURCES)]
 SortKey = Literal[tuple(SORTS)]
 CityKey = Literal[tuple(CITIES)]
 StateKey = Literal[tuple(STATES)]

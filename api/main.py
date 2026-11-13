@@ -1,12 +1,15 @@
+import asyncio
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Path, Query
 from fastapi.responses import JSONResponse
 
-from api.schemas import CityKey, ErrorBody, Health, PeriodKey, SearchResponse, SortKey, StateKey
+from api.schemas import (AdDetails, CityKey, ErrorBody, Health, PeriodKey, PriceHistory, PricePoint, SearchResponse,
+                         SortKey, SourceKey, StateKey)
 from api.service import OlxService, get_olx_service
+from database import ad_exists, get_link, get_price_history
 from filters import filter_by_price, filter_exact
-from scrapers.olx import OlxError
+from scrapers.olx import OlxError, scrape_details
 
 app = FastAPI(
     title="Pounce API",
@@ -14,6 +17,7 @@ app = FastAPI(
     version="1.0.0",
 )
 
+NOT_FOUND_RESPONSE = {404: {"model": ErrorBody, "description": "Бот ще не бачив цього оголошення"}}
 OLX_ERROR_RESPONSE = {502: {"model": ErrorBody, "description": "OLX не відповів: таймаут, мережа або HTTP-помилка"}}
 
 
@@ -50,3 +54,28 @@ async def search_ads(
         ads = filter_exact(ads, q)
     ads.sort(key=lambda ad: ad["promoted"])
     return SearchResponse(count=len(ads), cached=cached, ads=ads)
+
+
+@app.get("/ads/{source}/{ad_id}", response_model=AdDetails, responses=NOT_FOUND_RESPONSE, tags=["ads"],
+         summary="Деталі оголошення: опис, фото, оригінальна ціна")
+async def ad_details(
+    service: Annotated[OlxService, Depends(get_olx_service)],
+    source: Annotated[SourceKey, Path(description="Джерело оголошення")],
+    ad_id: Annotated[str, Path(description="Ідентифікатор оголошення з видачі")],
+):
+    link = await asyncio.to_thread(get_link, ad_id, source)
+    if link is None:
+        raise HTTPException(status_code=404, detail="Оголошення не знайдено")
+    return await service.run_in_slot(scrape_details, link)
+
+
+@app.get("/ads/{source}/{ad_id}/price-history", response_model=PriceHistory, responses=NOT_FOUND_RESPONSE,
+         tags=["ads"], summary="Історія цін оголошення з бази")
+def ad_price_history(
+    source: Annotated[SourceKey, Path(description="Джерело оголошення")],
+    ad_id: Annotated[str, Path(description="Ідентифікатор оголошення з видачі")],
+):
+    if not ad_exists(ad_id, source):
+        raise HTTPException(status_code=404, detail="Оголошення не знайдено")
+    points = [PricePoint(**row) for row in get_price_history(ad_id, source)]
+    return PriceHistory(source=source, ad_id=ad_id, points=points)
