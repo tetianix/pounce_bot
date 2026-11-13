@@ -47,12 +47,13 @@ KYIV = ZoneInfo("Europe/Kyiv")
 class OlxError(Exception):
     pass
 
-OLX_LOCK = threading.Lock()
+MAX_PARALLEL_REQUESTS = 2
+OLX_SLOTS = threading.BoundedSemaphore(MAX_PARALLEL_REQUESTS)
 
-def one_request_at_a_time(func):
+def limit_parallel_requests(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        with OLX_LOCK:
+        with OLX_SLOTS:
             return func(*args, **kwargs)
     return wrapper
 
@@ -163,7 +164,7 @@ def format_published_date(text, now=None):
         label = label[0].lower() + label[1:]
     return prefix + label + YEAR_SUFFIX_RE.sub("", text[match.end():])
 
-@one_request_at_a_time
+@limit_parallel_requests
 def scrape(query, page=1, min_price=None, max_price=None, sort="new", city=None, state=None):
     location = CITIES[city]["slug"] if city else "list"
     url = f"https://www.olx.ua/uk/{location}/q-{query}/"
@@ -220,7 +221,7 @@ def scrape(query, page=1, min_price=None, max_price=None, sort="new", city=None,
         return results
     raise OlxError(f"HTTP {response.status_code}")
 
-@one_request_at_a_time
+@limit_parallel_requests
 def scrape_details(link):
     try:
         response = requests.get(link, timeout=10, impersonate="chrome")
