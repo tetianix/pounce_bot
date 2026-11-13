@@ -1,9 +1,9 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 import database
-from tests.helpers import button_texts, make_ad, make_callback, make_message, named_ad
+from tests.helpers import button_texts, make_ad, make_callback, make_message, named_ad, olx_down
 
 
 @pytest.fixture
@@ -14,10 +14,8 @@ def run_search(app):
 
 
 @pytest.fixture
-def olx_search(app):
-    fake = MagicMock(return_value=[])
-    with patch.dict(app, {"search": fake, "get_ad_photo": MagicMock(return_value="photo")}):
-        yield fake
+def olx_search(fake_api):
+    return fake_api
 
 
 async def send_form(app, run_search, data):
@@ -53,30 +51,30 @@ async def test_watch_saved_with_filters(app, run_search):
 
 
 async def test_run_search_passes_city_and_state_to_search(app, olx_search):
-    olx_search.return_value = [make_ad()]
+    olx_search.ads = [make_ad()]
     await app["run_search"](make_message(), "iphone 13", city="odesa", state="used")
-    assert olx_search.call_args.kwargs["city"] == "odesa"
-    assert olx_search.call_args.kwargs["state"] == "used"
+    assert olx_search.searches[0]["city"] == "odesa"
+    assert olx_search.searches[0]["state"] == "used"
     state = app["message_results"][(1, 10)]
     assert (state["city"], state["state"], state["exact"]) == ("odesa", "used", False)
 
 
-async def test_exact_keeps_only_titles_with_all_words(app, olx_search):
-    olx_search.return_value = [named_ad("a", "iPhone 13 Pro"), named_ad("b", "iPhone 12"),
-                               named_ad("c", "Чохол 13 для iphone")]
+async def test_exact_is_left_to_api(app, olx_search):
+    olx_search.ads = [named_ad("a", "iPhone 13 Pro"), named_ad("c", "Чохол 13 для iphone")]
     await app["run_search"](make_message(), "iphone 13", exact=True)
+    assert olx_search.searches[0]["exact"] == "true"
     assert [ad["id"] for ad in app["message_results"][(1, 10)]["ads"]] == ["a", "c"]
 
 
 async def test_nothing_found_with_filters_suggests_removing_them(app, olx_search):
-    olx_search.return_value = [named_ad("b", "iPhone 12")]
+    olx_search.ads = []
     message = make_message()
     await app["run_search"](message, "iphone 13", exact=True)
     assert "прибрати частину фільтрів" in message.answer.await_args_list[-1].args[0]
 
 
 async def test_olx_error_is_not_reported_as_nothing_found(app, olx_search):
-    olx_search.side_effect = app["OlxError"]("таймаут")
+    olx_search.script = [olx_down()]
     message = make_message()
     await app["run_search"](message, "iphone")
     texts = [call.args[0] for call in message.answer.await_args_list]
@@ -106,19 +104,20 @@ async def test_watch_and_unwatch_use_filters_from_card(app):
 async def test_check_watches_searches_with_watch_filters(app, olx_search):
     database.save_watch(1, "iphone 13", None, None, city="lviv", state="new", exact=True)
     ads = [named_ad("a", "iPhone 13"), named_ad("b", "iPhone 12")]
-    olx_search.side_effect = lambda *args, **kwargs: [dict(ad) for ad in ads]
+    olx_search.ads = ads
     send = AsyncMock()
     with patch.dict(app, {"send_ad_card": send}):
         await app["check_watches"]()
-    assert olx_search.call_args.kwargs["city"] == "lviv"
-    assert olx_search.call_args.kwargs["state"] == "new"
+    assert olx_search.searches[0]["city"] == "lviv"
+    assert olx_search.searches[0]["state"] == "new"
     assert [call.args[1]["id"] for call in send.await_args_list] == ["a"]
 
 
 async def test_check_watches_without_filters_searches_all_ukraine(app, olx_search):
     database.save_watch(1, "iphone", None, None)
     await app["check_watches"]()
-    assert (olx_search.call_args.kwargs["city"], olx_search.call_args.kwargs["state"]) == (None, None)
+    assert "city" not in olx_search.searches[0]
+    assert "state" not in olx_search.searches[0]
 
 
 def test_filters_line_only_when_set(app):

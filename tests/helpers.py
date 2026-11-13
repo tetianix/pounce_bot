@@ -1,3 +1,4 @@
+import httpx
 import json
 from unittest.mock import AsyncMock, MagicMock
 
@@ -44,3 +45,44 @@ def make_message(data=None, user_id=1):
 
 def button_texts(markup):
     return [button.text for row in markup.inline_keyboard for button in row]
+
+
+class FakeApi:
+    def __init__(self):
+        self.ads = []
+        self.details = {"description": "Опис", "photos": ["https://x/cover.jpg"], "price": None}
+        self.known_ads = True
+        self.down = False
+        self.script = []
+        self.on_search = None
+        self.requests = []
+
+    @property
+    def searches(self):
+        return [dict(request.url.params) for request in self.requests if request.url.path == "/search"]
+
+    @property
+    def detail_requests(self):
+        return [request.url.path for request in self.requests if request.url.path.startswith("/ads/")]
+
+    def handle(self, request):
+        self.requests.append(request)
+        if self.down:
+            raise httpx.ConnectError("refused")
+        if request.url.path == "/search":
+            return self.answer_search(dict(request.url.params))
+        if not self.known_ads:
+            return httpx.Response(404, json={"detail": "Оголошення не знайдено"})
+        return httpx.Response(200, json=self.details)
+
+    def answer_search(self, params):
+        step = self.script.pop(0) if self.script else self.on_search(params) if self.on_search else self.ads
+        if isinstance(step, Exception):
+            raise step
+        if isinstance(step, httpx.Response):
+            return step
+        return httpx.Response(200, json={"count": len(step), "cached": False, "ads": step})
+
+
+def olx_down(reason="таймаут"):
+    return httpx.Response(502, json={"detail": f"OLX не відповів: {reason}"})

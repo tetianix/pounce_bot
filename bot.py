@@ -15,12 +15,13 @@ from aiogram.types import (
     WebAppInfo,
 )
 from dotenv import load_dotenv
-from core import search, search_recent, PERIODS
-from filters import filter_by_price, filter_exact, has_all_words
-from database import (save_ad, get_link, save_watch, get_active_watches, ad_exists, get_user_watches,
+from api_client import ApiClient, ApiError, EMPTY_DETAILS, OlxUnavailable, DEFAULT_API_URL, make_client
+from core import PERIODS
+from filters import has_all_words
+from database import (save_ad, save_watch, get_active_watches, ad_exists, get_user_watches,
                       get_watch, delete_watch, toggle_watch, get_last_price, save_price, save_favorite, get_favorites,
                       delete_favorite, get_max_price, is_favorite, delete_user_watch)
-from scrapers.olx import scrape_details, download_photo, format_published_date, SORTS, CITIES, STATES, OlxError
+from scrapers.olx import download_photo, format_published_date, SORTS, CITIES, STATES
 from collections import Counter
 import asyncio
 import html
@@ -39,6 +40,7 @@ MAX_RESULTS_PER_CHAT = 10
 RESULTS_TTL_SECONDS = 3600
 STALE_TEXT = "Це старий пошук, зроби новий 🐾"
 OLX_DOWN_TEXT = "OLX зараз не відповідає 😿\nСпробуй за хвилину"
+API_DOWN_TEXT = "Сервіс пошуку зараз недоступний 😿\nСпробуй за хвилину"
 NO_WATCHES_TEXT = "Наразі пошуків немає"
 WATCHES_PER_PAGE = 5
 CONVERTED_PRICE_THRESHOLD = 0.03
@@ -49,6 +51,7 @@ load_dotenv()
 token = os.getenv("BOT_TOKEN")
 bot = Bot(token=token)
 dp = Dispatcher()
+api = ApiClient(make_client(os.getenv("API_URL") or DEFAULT_API_URL))
 message_results = {}
 
 
@@ -95,15 +98,6 @@ def parse_price(value):
     return int(value)
 
 
-def get_ad_photo(ad):
-    url = ad['photo']
-    if url is None or not url.startswith('http'):
-        details = scrape_details(ad['link'])
-        if details["photos"]:
-            url = details["photos"][0]
-    return load_photo(url)
-
-
 def load_photo(url):
     if url is not None and url.startswith('http'):
         data = download_photo(url)
@@ -113,7 +107,15 @@ def load_photo(url):
 
 
 async def fetch_ad_photo(ad):
-    return await asyncio.to_thread(get_ad_photo, ad)
+    url = ad['photo']
+    if url is None or not url.startswith('http'):
+        try:
+            details = await api.details(ad['source'], ad['id'])
+        except ApiError:
+            details = None
+        if details and details["photos"]:
+            url = details["photos"][0]
+    return await fetch_photo(url)
 
 
 async def fetch_photo(url):
@@ -367,21 +369,16 @@ async def run_search(message, query, min_price=None, max_price=None, sort="new",
     status = await message.answer("Шукаю...")
     try:
         try:
-            if period in PERIODS:
-                ads = await asyncio.to_thread(search_recent, query, period, min_price=min_price,
-                                              max_price=max_price, sort=sort, city=city, state=state)
-            else:
-                ads = await asyncio.to_thread(search, query, min_price=min_price, max_price=max_price, sort=sort,
-                                              city=city, state=state)
-        except OlxError as e:
+            ads = await api.search(query, min_price=min_price, max_price=max_price, sort=sort, period=period,
+                                   city=city, state=state, exact=exact)
+        except OlxUnavailable as e:
             print("пошук: OLX не відповів:", e)
             await message.answer(OLX_DOWN_TEXT)
             return
-        if max_price is not None or min_price is not None:
-            ads = filter_by_price(ads, max_price=max_price, min_price=min_price)
-        if exact:
-            ads = filter_exact(ads, query)
-        ads.sort(key=lambda ad: ad["promoted"])
+        except ApiError as e:
+            print("пошук: API недоступний:", e)
+            await message.answer(API_DOWN_TEXT)
+            return
         if not ads:
             if describe_filters(city, state, exact):
                 await message.answer("Нічого не знайдено 😿\nСпробуй прибрати частину фільтрів або змінити запит")
@@ -429,9 +426,8 @@ async def search_for_watches(key, stats):
     query, min_price, max_price, city, state = key
     for delay in WATCH_RETRY_DELAYS + (None,):
         try:
-            return await asyncio.to_thread(search, query, min_price=min_price, max_price=max_price,
-                                           city=city, state=state)
-        except OlxError:
+            return await api.search(query, min_price=min_price, max_price=max_price, city=city, state=state)
+        except ApiError:
             if delay is None:
                 raise
             stats["retries"] += 1
@@ -500,7 +496,7 @@ async def check_watches():
         stats["requests"] += 1
         try:
             ads = await search_for_watches(key, stats)
-        except OlxError as e:
+        except ApiError as e:
             errors[str(e)] += 1
             failed_in_row += 1
             if failed_in_row >= MAX_FAILED_GROUPS_IN_ROW:
@@ -508,9 +504,7 @@ async def check_watches():
                 break
             continue
         failed_in_row = 0
-        query, min_price, max_price, _, _ = key
-        ads = filter_by_price(ads, max_price=max_price, min_price=min_price)
-        await notify_watchers(group, query, ads, stats)
+        await notify_watchers(group, key[0], ads, stats)
     print(format_check_summary(len(watches), stats, errors, monotonic() - started))
 
 
@@ -577,7 +571,12 @@ async def info_handler(callback: CallbackQuery):
         return
     ad = state["ads"][index]
 
-    details = await asyncio.to_thread(scrape_details, ad['link'])
+    try:
+        details = await api.details(ad['source'], ad['id']) or EMPTY_DETAILS
+    except ApiError as e:
+        print("деталі: API недоступний:", e)
+        await callback.answer(API_DOWN_TEXT, show_alert=True)
+        return
     text = build_info_caption(ad, details["description"], details["price"])
     state["details"] = {
         "index": index,
@@ -621,11 +620,15 @@ async def details_handler(callback: CallbackQuery):
     parts = callback.data.split(":")
     source = parts[1]
     ads_id = parts[2]
-    link = get_link(ads_id, source)
-    if link is None:
+    try:
+        details = await api.details(source, ads_id)
+    except ApiError as e:
+        print("деталі: API недоступний:", e)
+        await callback.answer(API_DOWN_TEXT, show_alert=True)
+        return
+    if details is None:
         await callback.answer("Опис не знайдено")
         return
-    details = await asyncio.to_thread(scrape_details, link)
     media = []
     for url in details["photos"]:
         media.append(InputMediaPhoto(media=url))
@@ -834,7 +837,10 @@ async def main():
     scheduler.add_job(check_watches, "interval", minutes=CHECK_INTERVAL_MINUTES)
     scheduler.start()
     await bot.delete_my_commands()
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await api.client.aclose()
 
 
 asyncio.run(main())

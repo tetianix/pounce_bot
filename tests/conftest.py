@@ -6,12 +6,15 @@ from unittest.mock import create_autospec, patch
 os.environ["DATABASE_URL"] = "sqlite://"
 os.environ.setdefault("BOT_TOKEN", "123456:TESTTOKENtesttokenTESTTOKENtesttoken")
 
+import httpx
 import pytest
 from aiogram import Bot
 from curl_cffi import requests as curl_requests
 
 import db
+from api_client import ApiClient
 from models import Base
+from tests.helpers import FakeApi
 
 ROOT = Path(__file__).resolve().parent.parent
 BLOCKED_CURL_FUNCTIONS = ("get", "post", "put", "patch", "delete", "head", "request")
@@ -70,3 +73,11 @@ def telegram(app):
     fake = create_autospec(Bot, instance=True)
     with patch.dict(app, {"bot": fake}):
         yield fake
+
+
+@pytest.fixture
+def fake_api(app):
+    api = FakeApi()
+    client = httpx.AsyncClient(base_url="http://api.test", transport=httpx.MockTransport(api.handle))
+    with patch.dict(app, {"api": ApiClient(client)}), patch.dict(app, {"load_photo": lambda url: "photo"}):
+        yield api
