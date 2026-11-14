@@ -15,6 +15,7 @@ from aiogram.types import (
     WebAppInfo,
 )
 from dotenv import load_dotenv
+import db
 from api_client import ApiClient, ApiError, EMPTY_DETAILS, OlxUnavailable, DEFAULT_API_URL, make_client
 from core import PERIODS
 from filters import has_all_words
@@ -327,17 +328,23 @@ def replace_button(markup, callback_data, new_button):
         rows.append([new_button if button.callback_data == callback_data else button for button in row])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
-def track_price(ad):
+def track_price(ad, session=None):
     if ad["price"] is None:
         return None
-    last_price = get_last_price(ad["id"], ad["source"], ad["currency"])
+    last_price = get_last_price(ad["id"], ad["source"], ad["currency"], session)
     if last_price is None:
-        save_price(ad["id"], ad["source"], ad["price"], ad["currency"])
+        save_price(ad["id"], ad["source"], ad["price"], ad["currency"], session)
         return None
     if is_real_change(last_price, ad["price"], ad["price_converted"]):
-        save_price(ad["id"], ad["source"], ad["price"], ad["currency"])
+        save_price(ad["id"], ad["source"], ad["price"], ad["currency"], session)
         return last_price
     return None
+
+
+def store_ad(ad, query):
+    with db.Session.begin() as session:
+        save_ad(ad, query, session)
+        return track_price(ad, session)
 
 async def send_ad_card(chat_id, ad, prefix="", query=None):
     lines = []
@@ -388,8 +395,7 @@ async def run_search(message, query, min_price=None, max_price=None, sort="new",
                 await message.answer("Нічого не знайдено 😿\nСпробуй коротший запит або інші слова")
             return
         for ad in ads:
-            save_ad(ad, query)
-            track_price(ad)
+            store_ad(ad, query)
         text, keyboard = build_ad_card(ads[0], 0, len(ads), watching=watching,
                                        user_id=message.from_user.id)
         card = await message.answer_photo(photo=await fetch_ad_photo(ads[0]), caption=text, reply_markup=keyboard,
@@ -446,9 +452,13 @@ def watch_users(group, ad, query):
 
 async def notify_watchers(group, query, ads, stats):
     for ad in ads:
-        is_new = not ad_exists(ad["id"], ad["source"])
-        old_price = track_price(ad)
-        save_ad(ad, query)
+        try:
+            is_new = not ad_exists(ad["id"], ad["source"])
+            old_price = store_ad(ad, query)
+        except Exception as e:
+            stats["save_errors"] += 1
+            print(f"стеження: не вдалося зберегти оголошення {ad['source']}/{ad['id']}: {type(e).__name__}: {e}")
+            continue
         if not is_new and old_price is None:
             continue
         for user_id in watch_users(group, ad, query):
@@ -472,6 +482,8 @@ def format_check_summary(watch_count, stats, errors, seconds):
         parts.append(f"не вдалося — {sum(errors.values())} ({details})")
     if stats["skipped"]:
         parts.append(f"пропущено — {stats['skipped']}, бо OLX не відповідає")
+    if stats["save_errors"]:
+        parts.append(f"не збережено оголошень — {stats['save_errors']}")
     parts.append(f"сповіщень — {stats['sent']}")
     send_errors = f"помилок надсилання — {stats['send_errors']}"
     if stats["send_errors"]:

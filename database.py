@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from datetime import datetime
 
 from sqlalchemy import delete, func, select, update
@@ -14,14 +15,32 @@ def insert_for(session, model):
     return sqlite_insert(model)
 
 
-def save_price(ad_id, ad_source, price, currency):
-    with db.Session.begin() as session:
+@contextmanager
+def writing(session):
+    if session is not None:
+        yield session
+        return
+    with db.Session.begin() as own_session:
+        yield own_session
+
+
+@contextmanager
+def reading(session):
+    if session is not None:
+        yield session
+        return
+    with db.Session() as own_session:
+        yield own_session
+
+
+def save_price(ad_id, ad_source, price, currency, session=None):
+    with writing(session) as session:
         session.add(PriceHistory(ad_id=ad_id, ad_source=ad_source, price=price, currency=currency,
                                  changed_at=datetime.now().isoformat()))
 
 
-def save_ad(ad, query):
-    with db.Session.begin() as session:
+def save_ad(ad, query, session=None):
+    with writing(session) as session:
         statement = insert_for(session, Ad).values(
             id=ad['id'], source=ad['source'], name=ad['name'], price=ad['price'], currency=ad['currency'],
             price_converted=int(ad['price_converted']), price_label=ad['price_label'], town=ad['town'],
@@ -67,10 +86,10 @@ def get_active_watches():
             select(Watch.__table__).where(Watch.is_active == 1).order_by(Watch.id)).mappings().all()
 
 
-def get_last_price(ad_id, ad_source, currency):
+def get_last_price(ad_id, ad_source, currency, session=None):
     if currency is None:
         return None
-    with db.Session() as session:
+    with reading(session) as session:
         return session.execute(
             select(PriceHistory.price)
             .where(PriceHistory.ad_id == ad_id, PriceHistory.ad_source == ad_source,
