@@ -10,6 +10,7 @@ import httpx
 import pytest
 from aiogram import Bot
 from curl_cffi import requests as curl_requests
+from sqlalchemy import event
 
 import db
 from api_client import ApiClient
@@ -46,7 +47,13 @@ def no_network():
 
 @pytest.fixture(autouse=True)
 def memory_db():
-    engine = db.use_engine(db.make_engine("sqlite://"))
+    new_engine = db.make_engine("sqlite://")
+
+    @event.listens_for(new_engine, "connect")
+    def enable_foreign_keys(connection, record):
+        connection.execute("PRAGMA foreign_keys=ON")
+
+    engine = db.use_engine(new_engine)
     Base.metadata.create_all(engine)
     yield engine
     engine.dispose()

@@ -1,5 +1,5 @@
 import threading
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -90,7 +90,6 @@ async def test_photo_is_prepared_outside_event_loop_thread(app, telegram, watch)
 
 
 async def test_new_ad_has_no_max_line(app, telegram, watch):
-    database.save_price("909426485", "olx", 2500, "UAH")
     await app["check_watches"]()
     caption = telegram.send_photo.await_args_list[0].kwargs["caption"]
     assert "🆕 Нове оголошення" in caption
@@ -211,3 +210,34 @@ async def test_watch_search_asks_api_with_group_filters(app, watch, search, wait
     params = [p for p in search.searches if p["q"] == "лампа"][0]
     assert params == {"q": "лампа", "sort": "new", "period": "any", "exact": "false", "page": "1",
                       "min_price": "100", "max_price": "500", "city": "lviv", "state": "new"}
+
+
+async def test_new_ad_and_its_first_price_are_saved_together(app, telegram, watch):
+    await app["check_watches"]()
+    assert database.ad_exists("909426485", "olx")
+    assert [row["price"] for row in database.get_price_history("909426485", "olx")] == [2200]
+
+
+async def test_price_is_not_saved_when_ad_save_fails(app, telegram, watch):
+    with patch.dict(app, {"save_ad": MagicMock(side_effect=RuntimeError("boom"))}):
+        await app["check_watches"]()
+    assert not database.ad_exists("909426485", "olx")
+    assert database.get_price_history("909426485", "olx") == []
+
+
+async def test_one_failed_ad_does_not_stop_the_others(app, telegram, watch, olx_ads, capsys):
+    olx_ads[:] = [make_ad(ad_id="1"), make_ad(ad_id="2")]
+    real_save_ad = app["save_ad"]
+
+    def flaky(ad, query, session=None):
+        if ad["id"] == "1":
+            raise RuntimeError("boom")
+        return real_save_ad(ad, query, session)
+
+    with patch.dict(app, {"save_ad": flaky}):
+        await app["check_watches"]()
+    assert not database.ad_exists("1", "olx")
+    assert database.ad_exists("2", "olx")
+    assert sent_count(telegram) == 1
+    output = capsys.readouterr().out
+    assert "olx/1" in output and "не збережено оголошень — 1" in output
