@@ -21,7 +21,7 @@ from core import PERIODS
 from filters import has_all_words
 from database import (save_ad, save_watch, get_active_watches, ad_exists, get_user_watches,
                       get_watch, delete_watch, toggle_watch, get_last_price, save_price, save_favorite, get_favorites,
-                      delete_favorite, get_max_price, is_favorite, delete_user_watch)
+                      delete_favorite, get_max_price, is_favorite, delete_user_watch, mark_hint_shown)
 from scrapers.olx import download_photo, format_published_date, SORTS, CITIES, STATES
 from collections import Counter
 import asyncio
@@ -42,6 +42,8 @@ RESULTS_TTL_SECONDS = 3600
 STALE_TEXT = "Це старий пошук, зроби новий 🐾"
 OLX_DOWN_TEXT = "OLX зараз не відповідає 😿\nСпробуй за хвилину"
 API_DOWN_TEXT = "Сервіс пошуку зараз недоступний 😿\nСпробуй за хвилину"
+FIRST_SEARCH_HINT = "first_search"
+FIRST_SEARCH_HINT_TEXT = "💡 Сподобалось щось? Натисни 🔔 Стежити — напишу, щойно з'явиться нове"
 NO_WATCHES_TEXT = "Наразі пошуків немає"
 WATCHES_PER_PAGE = 5
 CONVERTED_PRICE_THRESHOLD = 0.03
@@ -408,6 +410,15 @@ async def send_ad_card(chat_id, ad, prefix="", query=None):
         await bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard, parse_mode="HTML")
 
 
+async def send_first_search_hint(message):
+    try:
+        if not mark_hint_shown(message.from_user.id, FIRST_SEARCH_HINT):
+            return
+        await message.answer(FIRST_SEARCH_HINT_TEXT)
+    except Exception as e:
+        print(f"підказка: не вдалося показати: {type(e).__name__}: {e}")
+
+
 async def run_search(message, query, min_price=None, max_price=None, sort="new", watching=False, period="any",
                      city=None, state=None, exact=False):
     status = await message.answer("Шукаю...")
@@ -448,6 +459,7 @@ async def run_search(message, query, min_price=None, max_price=None, sort="new",
             "exact": exact,
             "watching": watching,
         })
+        await send_first_search_hint(message)
     finally:
         await status.delete()
 
