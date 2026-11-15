@@ -79,3 +79,12 @@ class Favorite(Base):
     ad_id: Mapped[str] = mapped_column(Text)
     ad_source: Mapped[str] = mapped_column(Text)
     saved_at: Mapped[str | None] = mapped_column(Text)
+
+
+class ShownHint(Base):
+    __tablename__ = "shown_hints"
+    __table_args__ = (PrimaryKeyConstraint("user_id", "hint"),)
+
+    user_id: Mapped[int] = mapped_column(BigInteger)
+    hint: Mapped[str] = mapped_column(Text)
+    shown_at: Mapped[str | None] = mapped_column(Text)

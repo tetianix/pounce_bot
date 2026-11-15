@@ -113,3 +113,14 @@ def test_delete_user_watch_matches_all_filters(user_id, query, filters):
     deleted = (filters.get("city", ""), filters.get("state", ""), int(filters.get("exact", False)))
     assert deleted not in remaining
     assert len(remaining) == 2
+
+
+def test_mark_hint_shown_true_only_first_time():
+    assert database.mark_hint_shown(1, "first_search") is True
+    assert database.mark_hint_shown(1, "first_search") is False
+
+
+def test_mark_hint_shown_is_per_user_and_per_hint():
+    assert database.mark_hint_shown(1, "first_search") is True
+    assert database.mark_hint_shown(2, "first_search") is True
+    assert database.mark_hint_shown(1, "other") is True

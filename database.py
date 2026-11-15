@@ -6,7 +6,7 @@ from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 import db
-from models import Ad, Favorite, PriceHistory, Watch
+from models import Ad, Favorite, PriceHistory, ShownHint, Watch
 
 
 def insert_for(session, model):
@@ -175,3 +175,11 @@ def toggle_watch(watch_id):
 def ad_exists(ad_id, source):
     with db.Session() as session:
         return session.execute(select(Ad.id).where(Ad.id == ad_id, Ad.source == source).limit(1)).first() is not None
+
+
+def mark_hint_shown(user_id, hint):
+    with db.Session.begin() as session:
+        statement = insert_for(session, ShownHint).values(
+            user_id=user_id, hint=hint, shown_at=datetime.now().isoformat())
+        result = session.execute(statement.on_conflict_do_nothing())
+        return result.rowcount == 1

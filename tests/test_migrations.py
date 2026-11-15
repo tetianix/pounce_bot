@@ -30,7 +30,7 @@ def test_upgrade_creates_every_table_and_matches_models(connection, alembic_conf
     command.upgrade(alembic_config, "head")
     tables = set(inspect(connection).get_table_names())
     diff = compare_metadata(MigrationContext.configure(connection), Base.metadata)
-    assert tables == {"ads", "watches", "price_history", "favorites", "alembic_version"}
+    assert tables == {"ads", "watches", "price_history", "favorites", "shown_hints", "alembic_version"}
     assert diff == []
 
 
