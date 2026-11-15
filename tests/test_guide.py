@@ -35,12 +35,14 @@ def test_every_callback_fits_telegram_limit(app):
                 assert len(button.callback_data.encode()) <= 64
 
 
-async def test_start_has_help_button_and_menu(app):
+async def test_start_greets_with_menu_then_offers_guide(app):
     message = make_text_message()
     await app["start_handler"](message)
     first, second = message.answer.await_args_list
-    assert button_texts(first.kwargs["reply_markup"]) == ["❓ Як користуватись"]
-    assert "❓ Допомога" in [b.text for row in second.kwargs["reply_markup"].keyboard for b in row]
+    assert "Pounce" in first.args[0]
+    assert "❓ Допомога" in [b.text for row in first.kwargs["reply_markup"].keyboard for b in row]
+    assert second.args[0] == "Вперше тут? Ось коротка інструкція 👇"
+    assert button_texts(second.kwargs["reply_markup"]) == ["❓ Як користуватись"]
 
 
 async def test_help_button_opens_first_page(app):

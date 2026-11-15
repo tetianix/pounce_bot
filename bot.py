@@ -577,10 +577,10 @@ async def start_handler(message: Message):
         "🔎 Напиши, що шукаєш, наприклад <i>помада Dior</i>\n"
         "🎯 Або відкрий «Пошук з фільтрами», щоб задати ціну\n"
         "🔔 Натисни «Стежити», і я напишу, коли з'явиться нове або подешевшає",
-        reply_markup=build_help_button(),
+        reply_markup=build_main_keyboard(),
         parse_mode="HTML",
     )
-    await message.answer("Кнопки меню — внизу 👇", reply_markup=build_main_keyboard())
+    await message.answer("Вперше тут? Ось коротка інструкція 👇", reply_markup=build_help_button())
 
 
 @dp.message(F.text == "❓ Допомога")
