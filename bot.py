@@ -47,6 +47,21 @@ WATCHES_PER_PAGE = 5
 CONVERTED_PRICE_THRESHOLD = 0.03
 CURRENCY_SIGNS = {"UAH": "грн", "USD": "$", "EUR": "€"}
 WEBAPP_URL = "https://tetianix.github.io/pounce_webapp/"
+GUIDE_PAGES = (
+    "🔎 <b>Пошук</b>\n\n"
+    "Просто напиши, що шукаєш, наприклад <i>помада Dior</i>, і я покажу оголошення з OLX.\n"
+    "Гортай їх кнопками ◀ ▶ під карткою 🐾",
+    "🎯 <b>Фільтри</b>\n\n"
+    "Натисни «🔍 Пошук з фільтрами» внизу: там можна задати ціну, місто, стан товару, "
+    "сортування і період, за який шукати.",
+    "🔔 <b>Стеження</b>\n\n"
+    "Натисни «🔔 Стежити» під оголошенням, і я перевірятиму OLX кожні 15 хвилин. "
+    "Напишу, щойно з'явиться щось нове або подешевшає.\n"
+    "Усі стеження — у «📌 Мої пошуки».",
+    "⭐ <b>Обране</b>\n\n"
+    "«⭐ В обране» зберігає оголошення, щоб не загубити. Знайдеш їх у «⭐ Обране».\n"
+    "«Детальніше» покаже опис і всі фото.",
+)
 
 load_dotenv()
 token = os.getenv("BOT_TOKEN")
@@ -133,11 +148,33 @@ def build_main_keyboard():
             [
                 KeyboardButton(text="🔍 Пошук з фільтрами", web_app=WebAppInfo(url=WEBAPP_URL)),
             ],
+            [
+                KeyboardButton(text="❓ Допомога"),
+            ],
         ],
         resize_keyboard=True,
         is_persistent=True,
         input_field_placeholder="Що шукаємо? Напр. помада",
     )
+
+
+def build_guide_page(page):
+    total = len(GUIDE_PAGES)
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="◀", callback_data=f"guide:{(page - 1) % total}"),
+            InlineKeyboardButton(text=f"{page + 1}/{total}", callback_data="noop"),
+            InlineKeyboardButton(text="▶", callback_data=f"guide:{(page + 1) % total}"),
+        ],
+        [InlineKeyboardButton(text="✕ Закрити", callback_data="guide_close")],
+    ])
+    return GUIDE_PAGES[page], keyboard
+
+
+def build_help_button():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❓ Як користуватись", callback_data="guide:0")],
+    ])
 
 
 def format_price_range(min_price, max_price):
@@ -528,9 +565,36 @@ async def start_handler(message: Message):
         "🔎 Напиши, що шукаєш, наприклад <i>помада Dior</i>\n"
         "🎯 Або відкрий «Пошук з фільтрами», щоб задати ціну\n"
         "🔔 Натисни «Стежити», і я напишу, коли з'явиться нове або подешевшає",
-        reply_markup=build_main_keyboard(),
+        reply_markup=build_help_button(),
         parse_mode="HTML",
     )
+    await message.answer("Кнопки меню — внизу 👇", reply_markup=build_main_keyboard())
+
+
+@dp.message(F.text == "❓ Допомога")
+async def help_handler(message: Message):
+    text, keyboard = build_guide_page(0)
+    await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+@dp.callback_query(F.data.startswith("guide:"))
+async def guide_handler(callback: CallbackQuery):
+    page = int(callback.data.split(":")[1])
+    if page < 0 or page >= len(GUIDE_PAGES):
+        await callback.answer()
+        return
+    text, keyboard = build_guide_page(page)
+    if callback.message.text == text:
+        await callback.answer()
+        return
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "guide_close")
+async def guide_close_handler(callback: CallbackQuery):
+    await callback.message.delete()
+    await callback.answer()
 
 
 @dp.message(F.text == "📌 Мої пошуки")
